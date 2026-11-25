@@ -24,6 +24,11 @@ import { useModelDefaults, useModels } from '@/lib/hooks/use-models'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 
+const LOCAL_CLI_LABELS: Record<string, string> = {
+  claude_code: 'Claude Code',
+  codex_cli: 'Codex',
+}
+
 interface ModelSelectorProps {
   currentModel?: string
   onModelChange: (model?: string) => void
@@ -61,11 +66,15 @@ export function ModelSelector({
   }, [defaults?.default_chat_model, languageModels])
 
   const currentModelName = useMemo(() => {
+    // Local CLI models are usually all named "default"; show which CLI.
+    const label = (m: { name: string; provider: string }) =>
+      LOCAL_CLI_LABELS[m.provider] ? `${LOCAL_CLI_LABELS[m.provider]} · ${m.name}` : m.name
     if (currentModel) {
-      return languageModels.find(model => model.id === currentModel)?.name || currentModel
+      const m = languageModels.find(model => model.id === currentModel)
+      return m ? label(m) : currentModel
     }
     if (defaultModel) {
-      return defaultModel.name
+      return label(defaultModel)
     }
     return t('common.default')
   }, [currentModel, languageModels, defaultModel, t('common.default')])
