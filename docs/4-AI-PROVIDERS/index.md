@@ -10,6 +10,8 @@ This page has three parts:
 
 Per-provider details (where to get a key, base URLs, regional endpoints) are in the [AI Providers Configuration Guide](../5-CONFIGURATION/ai-providers.md).
 
+Already logged into **Claude Code** or **Codex** on this computer? You can chat through those CLIs without an API key: see [Local AI CLIs](local-cli.md).
+
 ---
 
 ## Connect a provider
