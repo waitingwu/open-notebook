@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 from typing import Any, ClassVar, Dict, Optional, Sequence, Union
 
 from esperanto import (
@@ -12,12 +13,19 @@ from loguru import logger
 from surrealdb import RecordID
 
 from open_notebook.ai.connection_tester import normalize_anthropic_compatible_base_url
+from open_notebook.ai.local_cli import is_local_cli_provider
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.base import ObjectModel, RecordModel
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils.url_validation import validate_url
 
-ModelType = Union[LanguageModel, EmbeddingModel, SpeechToTextModel, TextToSpeechModel]
+ModelType = Union[
+    LanguageModel,
+    EmbeddingModel,
+    SpeechToTextModel,
+    TextToSpeechModel,
+    "LocalCLIModelHandle",
+]
 
 # Config keys from Credential.to_esperanto_config() that may carry a
 # user-configured URL (ollama/azure/openai_compatible/vertex).
@@ -198,6 +206,20 @@ class DefaultModels(RecordModel):
         return instance
 
 
+@dataclass(frozen=True)
+class LocalCLIModelHandle:
+    """Language model served by a local AI CLI (see open_notebook/ai/local_cli)."""
+
+    provider: str
+    model_name: str
+    model_id: Optional[str] = None
+
+    def to_langchain(self):
+        from open_notebook.ai.local_cli.chat_model import LocalCLIChatModel
+
+        return LocalCLIChatModel(provider=self.provider, model_name=self.model_name)
+
+
 class ModelManager:
     def __init__(self):
         pass  # No caching needed
@@ -219,6 +241,18 @@ class ModelManager:
             "text_to_speech",
         ]:
             raise ConfigurationError(f"Invalid model type: {model.type}")
+
+        # Local CLI runtimes (Claude Code / Codex) authenticate themselves with
+        # the login that already exists on this machine: no credential, no
+        # env-var provisioning, no Esperanto client.
+        if is_local_cli_provider(model.provider):
+            if model.type != "language":
+                raise ConfigurationError(
+                    f"{model.provider} only supports language models, not {model.type}"
+                )
+            return LocalCLIModelHandle(
+                provider=model.provider, model_name=model.name, model_id=str(model.id)
+            )
 
         # Build config from credential if linked, otherwise fall back to env vars
         config: dict = {}

@@ -26,7 +26,7 @@ from open_notebook.exceptions import (
 from open_notebook.graphs.source_chat import source_chat_graph as source_chat_graph
 from open_notebook.utils.graph_utils import (
     get_session_message_count,
-    invoke_chat_turn,
+    stream_chat_turn,
 )
 
 router = APIRouter()
@@ -375,25 +375,63 @@ async def stream_source_chat_response(
         user_event = {"type": "user_message", "content": message, "timestamp": None}
         yield f"data: {json.dumps(user_event)}\n\n"
 
-        # Run the synchronous LangGraph invoke in a thread so it doesn't block the
-        # event loop. While blocked, even the already-yielded SSE events can't
-        # flush and every other request stalls until the LLM finishes. Mirrors the
-        # get_state() calls above.
-        # invoke_chat_turn also drops the question from the checkpoint when the
-        # turn fails, so a retry doesn't add it twice.
-        result = await asyncio.to_thread(
-            invoke_chat_turn,
-            source_chat_graph,
-            state_values,
-            RunnableConfig(
-                configurable={"thread_id": session_id, "model_id": model_override}
-            ),
-            user_message,
-        )
+        # Run the synchronous LangGraph turn in a worker thread and forward the
+        # model's tokens to the client as they arrive (one ai_message event per
+        # chunk; the frontend appends them). stream_chat_turn also drops the
+        # question from the checkpoint when the turn fails.
+        loop = asyncio.get_running_loop()
+        tokens: asyncio.Queue = asyncio.Queue()
 
-        # Stream this turn's AI response. result["messages"] is the full
-        # checkpointed history, so only the last message is new.
-        if result.get("messages"):
+        def on_token(text: str) -> None:
+            loop.call_soon_threadsafe(tokens.put_nowait, text)
+
+        turn = asyncio.create_task(
+            asyncio.to_thread(
+                stream_chat_turn,
+                source_chat_graph,
+                state_values,
+                RunnableConfig(
+                    configurable={"thread_id": session_id, "model_id": model_override},
+                    metadata={
+                        "audit_feature": "source_chat",
+                        "audit_source_ids": [source_id],
+                    },
+                ),
+                user_message,
+                on_token,
+            )
+        )
+        streamed_any = False
+        while True:
+            get_token = asyncio.create_task(tokens.get())
+            done, _ = await asyncio.wait(
+                {turn, get_token}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if get_token in done:
+                streamed_any = True
+                event = {
+                    "type": "ai_message",
+                    "content": get_token.result(),
+                    "timestamp": None,
+                }
+                yield f"data: {json.dumps(event)}\n\n"
+                continue
+            get_token.cancel()
+            break
+        while not tokens.empty():
+            streamed_any = True
+            event = {
+                "type": "ai_message",
+                "content": tokens.get_nowait(),
+                "timestamp": None,
+            }
+            yield f"data: {json.dumps(event)}\n\n"
+        result = turn.result() or {}
+
+        # Models that cannot stream: send this turn's answer in one event.
+        # result["messages"] is the full checkpointed history, so only the
+        # last message is new.
+        if not streamed_any and result.get("messages"):
             msg = result["messages"][-1]
             if getattr(msg, "type", None) == "ai":
                 ai_event = {

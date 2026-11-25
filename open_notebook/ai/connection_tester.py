@@ -524,6 +524,24 @@ async def test_individual_model(model) -> Tuple[bool, str]:
         if esp_model is None:
             return False, "Could not create model instance"
 
+        from open_notebook.ai.local_cli import is_local_cli_provider
+        from open_notebook.ai.models import LocalCLIModelHandle
+
+        if is_local_cli_provider(model.provider) and isinstance(
+            esp_model, LocalCLIModelHandle
+        ):
+            from langchain_core.messages import HumanMessage
+
+            from open_notebook.exceptions import OpenNotebookError
+
+            try:
+                reply = await esp_model.to_langchain().ainvoke(
+                    [HumanMessage(content="Reply with exactly: OK")]
+                )
+                return True, f"Local CLI answered: {str(reply.content)[:40]}"
+            except OpenNotebookError as e:
+                return False, str(e)[:300]
+
         if model.type == "language":
             if not isinstance(esp_model, LanguageModel):
                 return (

@@ -43,6 +43,7 @@ from api.routers import (
     episode_profiles,
     insights,
     languages,
+    local_cli,
     models,
     notebooks,
     notes,
@@ -483,6 +484,7 @@ app.include_router(credentials.router, prefix="/api", tags=["credentials"])
 app.include_router(providers.router, prefix="/api", tags=["providers"])
 app.include_router(capabilities.router, prefix="/api", tags=["capabilities"])
 app.include_router(languages.router, prefix="/api", tags=["languages"])
+app.include_router(local_cli.router, prefix="/api", tags=["local-cli"])
 
 
 @app.get("/")

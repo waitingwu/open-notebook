@@ -1,7 +1,7 @@
 import asyncio
-from typing import Any
+from typing import Any, Callable
 
-from langchain_core.messages import BaseMessage, RemoveMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 
@@ -54,6 +54,41 @@ def invoke_chat_turn(
         # LangGraph accepts a partial state dict at runtime, but its typed
         # signature requires the full state type.
         return graph.invoke(input=state, config=config)
+    except Exception:
+        thread_id = config.get("configurable", {}).get("thread_id")
+        if thread_id:
+            discard_unanswered_message(graph, thread_id, user_message)
+        raise
+
+
+def stream_chat_turn(
+    graph,
+    state: dict,
+    config: RunnableConfig,
+    user_message: BaseMessage,
+    on_token: Callable[[str], None],
+) -> Any:
+    """Like invoke_chat_turn, but reports model tokens as they are generated.
+
+    Uses LangGraph's "messages" stream mode, which surfaces the chat model's
+    token callbacks even though the node itself calls `model.invoke()`.
+    Returns the final graph state (same value invoke_chat_turn returns).
+    Synchronous; run it via asyncio.to_thread.
+    """
+    final_state: Any = None
+    try:
+        for mode, payload in graph.stream(
+            input=state, config=config, stream_mode=["messages", "values"]
+        ):
+            if mode == "messages":
+                chunk, _meta = payload
+                if isinstance(chunk, AIMessageChunk):
+                    text = chunk.content if isinstance(chunk.content, str) else ""
+                    if text:
+                        on_token(text)
+            elif mode == "values":
+                final_state = payload
+        return final_state
     except Exception:
         thread_id = config.get("configurable", {}).get("thread_id")
         if thread_id:

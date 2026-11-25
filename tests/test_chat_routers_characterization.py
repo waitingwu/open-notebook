@@ -358,7 +358,7 @@ async def test_stream_emits_only_the_new_ai_message(mock_graph):
             ]
         }
     )
-    mock_graph.invoke.return_value = {
+    final_state = {
         "messages": [
             _Msg("m1", "human", "first question"),
             _Msg("m2", "ai", "first answer"),
@@ -367,6 +367,8 @@ async def test_stream_emits_only_the_new_ai_message(mock_graph):
         ],
         "context_indicators": {"sources": ["source:xyz"], "insights": [], "notes": []},
     }
+    # A model that does not stream tokens: only the final state arrives.
+    mock_graph.stream.return_value = iter([("values", final_state)])
 
     events = await _collect_events(
         stream_source_chat_response("chat_session:abc", "source:xyz", "second question")
@@ -380,3 +382,34 @@ async def test_stream_emits_only_the_new_ai_message(mock_graph):
         "context_indicators",
         "complete",
     ]
+
+
+@pytest.mark.asyncio
+@patch("api.routers.source_chat.source_chat_graph")
+async def test_stream_forwards_model_tokens(mock_graph):
+    """Streaming models (e.g. local CLI runtimes) emit one ai_message per token
+    chunk; the final full message is then not sent again."""
+    from langchain_core.messages import AIMessageChunk
+
+    from api.routers.source_chat import stream_source_chat_response
+
+    mock_graph.get_state.return_value = _graph_state({"messages": []})
+    final_state = {
+        "messages": [_Msg("m1", "human", "q"), _Msg("m2", "ai", "Hello world")],
+        "context_indicators": {"sources": ["source:xyz"], "insights": [], "notes": []},
+    }
+    mock_graph.stream.return_value = iter(
+        [
+            ("messages", (AIMessageChunk(content="Hello"), {})),
+            ("messages", (AIMessageChunk(content=" world"), {})),
+            ("values", final_state),
+        ]
+    )
+
+    events = await _collect_events(
+        stream_source_chat_response("chat_session:abc", "source:xyz", "q")
+    )
+
+    ai_events = [e["content"] for e in events if e["type"] == "ai_message"]
+    assert ai_events == ["Hello", " world"]
+    assert events[-1]["type"] == "complete"
