@@ -1,0 +1,5 @@
+REMOVE TABLE IF EXISTS ai_rate_limit;
+REMOVE TABLE IF EXISTS ai_usage;
+REMOVE TABLE IF EXISTS ai_run_event;
+REMOVE TABLE IF EXISTS ai_run;
+DELETE open_notebook:audit_settings;

@@ -94,7 +94,8 @@ async def stream_ask_response(
                     strategy_model=strategy_model.id,
                     answer_model=answer_model.id,
                     final_answer_model=final_answer_model.id,
-                )
+                ),
+                metadata=dict(audit_feature="ask"),
             ),
             stream_mode="updates",
         ):
@@ -246,7 +247,8 @@ async def ask_knowledge_base_simple(ask_request: AskRequest):
                     strategy_model=strategy_model.id,
                     answer_model=answer_model.id,
                     final_answer_model=final_answer_model.id,
-                )
+                ),
+                metadata=dict(audit_feature="ask"),
             ),
             stream_mode="updates",
         ):

@@ -371,7 +371,13 @@ async def execute_chat(request: ExecuteChatRequest):
                 configurable={
                     "thread_id": full_session_id,
                     "model_id": model_override,
-                }
+                },
+                metadata={
+                    "audit_feature": "notebook_chat",
+                    "audit_notebook_id": str(notebook.id)
+                    if notebook and notebook.id
+                    else None,
+                },
             ),
             user_message,
         )

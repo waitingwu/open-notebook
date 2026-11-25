@@ -467,6 +467,14 @@ async def delete_notebook(
             delete_exclusive_sources=delete_exclusive_sources
         )
 
+        # Audit log: drop this notebook's run events, keep anonymous usage.
+        try:
+            from open_notebook.audit.service import detach_notebook
+
+            await detach_notebook(str(notebook.id))
+        except Exception as e:
+            logger.warning(f"Could not detach audit runs from notebook: {e}")
+
         return NotebookDeleteResponse(
             message="Notebook deleted successfully",
             deleted_notes=result["deleted_notes"],

@@ -13,6 +13,7 @@ from open_notebook.ai.local_cli.parsing import (
     parse_claude_line,
     parse_codex_notification,
 )
+from open_notebook.audit.redact import redact_text, tail
 from open_notebook.exceptions import (
     AuthenticationError,
     ConfigurationError,
@@ -119,3 +120,51 @@ def test_rate_limit_merge_keeps_windows():
     new: dict = {"plan": None, "status": "allowed", "windows": []}
     merged = _merge_rate_limit(old, new)
     assert merged["windows"] == old["windows"] and merged["plan"] == "business"
+
+
+def test_redaction():
+    text = "key sk-abcdefghijklmnopqrstuvwxyz123 by someone@example.com Bearer abcdefghijklmnopqrstu"
+    out = redact_text(text)
+    assert (
+        "sk-abc" not in out
+        and "someone@" not in out
+        and "abcdefghijklmnopqrstu" not in out
+    )
+    long_text = "x" * 5000 + "END"
+    cut, truncated = tail(long_text)
+    assert truncated and cut.endswith("END") and len(cut.encode()) <= 2048
+
+
+def test_audit_handler_never_records_prompt_or_answer(monkeypatch):
+    """The audit record holds lengths and a hash only, never the text."""
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from open_notebook.audit import recorder
+
+    captured: dict = {}
+
+    def fake_persist(record, events, usage, rate_limit):
+        captured.update(record=record, events=events)
+
+        async def _noop():
+            return None
+
+        return _noop()
+
+    monkeypatch.setattr(recorder, "persist_run", fake_persist)
+    monkeypatch.setattr(recorder.writer, "submit", lambda coro: coro.close())
+    model = FakeListChatModel(responses=["SECRET-ANSWER-TEXT"])
+    model.callbacks = [
+        recorder.AuditCallbackHandler("fake", "fake-model", None, "chat")
+    ]
+    model.invoke(
+        [HumanMessage(content="CONFIDENTIAL-SOURCE-TEXT sk-abcdefghijklmnopqrstuvwxyz")]
+    )
+
+    dumped = json.dumps(captured, default=str)
+    assert "CONFIDENTIAL-SOURCE-TEXT" not in dumped
+    assert "SECRET-ANSWER-TEXT" not in dumped
+    assert "sk-abc" not in dumped
+    rec = captured["record"]
+    assert rec["status"] == "success" and rec["prompt_chars"] > 0
+    assert len(rec["prompt_sha256"]) == 64
