@@ -236,9 +236,14 @@ async def apply_retention() -> Dict[str, int]:
     ev = await repo_query(
         "DELETE ai_run_event WHERE created < $cut RETURN BEFORE", {"cut": ev_cut}
     )
-    old_runs = await repo_query(
-        "SELECT VALUE id FROM ai_run WHERE started_at < $cut", {"cut": run_cut}
-    )
+    # repo_query returns record IDs as strings; convert them back so the
+    # INSIDE comparisons below match RecordID values.
+    old_runs = [
+        ensure_record_id(str(r))
+        for r in await repo_query(
+            "SELECT VALUE id FROM ai_run WHERE started_at < $cut", {"cut": run_cut}
+        )
+    ]
     if old_runs:
         await repo_query("DELETE ai_run_event WHERE run INSIDE $ids", {"ids": old_runs})
         await repo_query("DELETE ai_usage WHERE run INSIDE $ids", {"ids": old_runs})
@@ -257,9 +262,12 @@ async def clear_all() -> None:
 async def detach_notebook(notebook_id: str) -> None:
     """On notebook deletion: drop its run events, keep anonymous usage."""
     nb = str(notebook_id)
-    runs = await repo_query(
-        "SELECT VALUE id FROM ai_run WHERE notebook_id = $nb", {"nb": nb}
-    )
+    runs = [
+        ensure_record_id(str(r))
+        for r in await repo_query(
+            "SELECT VALUE id FROM ai_run WHERE notebook_id = $nb", {"nb": nb}
+        )
+    ]
     if runs:
         await repo_query("DELETE ai_run_event WHERE run INSIDE $ids", {"ids": runs})
         await repo_query(

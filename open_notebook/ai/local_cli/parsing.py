@@ -123,7 +123,12 @@ def parse_claude_line(msg: Dict[str, Any]) -> List[Event]:
                 {
                     "kind": "usage",
                     "model": model,
-                    "input_tokens": int(u.get("inputTokens") or 0),
+                    # Normalized: input_tokens = total prompt tokens incl. cache
+                    # reads/writes (Claude reports them separately; Codex and
+                    # LangChain already include them).
+                    "input_tokens": int(u.get("inputTokens") or 0)
+                    + int(u.get("cacheReadInputTokens") or 0)
+                    + int(u.get("cacheCreationInputTokens") or 0),
                     "output_tokens": int(u.get("outputTokens") or 0),
                     "cache_read_tokens": int(u.get("cacheReadInputTokens") or 0),
                     "cache_write_tokens": int(u.get("cacheCreationInputTokens") or 0),
