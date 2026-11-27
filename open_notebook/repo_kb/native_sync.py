@@ -10,7 +10,11 @@ from typing import Any, Awaitable, Callable, Protocol
 from surrealdb import RecordID
 
 from open_notebook.repo_kb.gitsource import GitRepo
-from open_notebook.repo_kb.native_ingest import prepare_entry
+from open_notebook.repo_kb.native_ingest import (
+    PreparedChunk,
+    PreparedFile,
+    prepare_entry,
+)
 from open_notebook.repo_kb.native_lock import WriteLock, acquire, release
 from open_notebook.repo_kb.native_paths import validate_source_path
 from open_notebook.repo_kb.native_store import (
@@ -29,15 +33,16 @@ class Database(Protocol):
 Progress = Callable[[int, int], Awaitable[None]]
 
 
-async def sync_full_source(
+async def sync_source(
     db: Database,
     source_id: RecordID,
     *,
     allowed_roots: list[str],
     data_roots: list[str],
     progress: Progress | None = None,
+    incremental: bool = True,
 ) -> dict[str, Any]:
-    """Stage a full source and activate it only after all writes succeed.
+    """Stage a source and activate it only after all writes succeed.
 
     Subsequent wiki and search builds remain separate jobs.
     """
@@ -56,7 +61,14 @@ async def sync_full_source(
         ):
             raise ValueError("Source changed before sync")
         return await _sync_locked(
-            db, source_id, current, lock, allowed_roots, data_roots, progress
+            db,
+            source_id,
+            current,
+            lock,
+            allowed_roots,
+            data_roots,
+            progress,
+            incremental,
         )
     finally:
         await release(db.query_raw, lock)
@@ -70,6 +82,7 @@ async def _sync_locked(
     allowed_roots: list[str],
     data_roots: list[str],
     progress: Progress | None,
+    incremental: bool,
 ) -> dict[str, Any]:
     path = validate_source_path(
         source["path"], allowed_roots=allowed_roots, data_roots=data_roots
@@ -85,13 +98,50 @@ async def _sync_locked(
         entries = await asyncio.to_thread(
             lambda: list(git.walk(commit, rules.allows_dir, rules.allows_file))
         )
+        old_files: dict[str, dict[str, Any]] = {}
+        if incremental and source.get("current_snapshot"):
+            rows = await db.query(
+                "SELECT * FROM repo_file WHERE source = $source AND snapshot = $snapshot;",
+                {"source": source_id, "snapshot": source["current_snapshot"]},
+            )
+            if not isinstance(rows, list):
+                raise RuntimeError("Unable to read previous source snapshot")
+            old_files = {
+                row["path"]: row for row in rows if rules.allows_file(row["path"])
+            }
         categories: Counter[str] = Counter()
         masks: Counter[str] = Counter()
+        reused = 0
         with tempfile.TemporaryDirectory(prefix="repo-kb-convert-") as tmp:
             for index, entry in enumerate(entries, 1):
-                prepared = await asyncio.to_thread(
-                    prepare_entry, git, entry, source["role"], protected, tmp
-                )
+                old = old_files.get(entry.path)
+                if old and old["blob"] == entry.blob:
+                    chunks = await db.query(
+                        "SELECT * FROM repo_chunk WHERE file = $file ORDER BY start_line;",
+                        {"file": old["id"]},
+                    )
+                    if not isinstance(chunks, list):
+                        raise RuntimeError("Unable to read previous source chunks")
+                    prepared = PreparedFile(
+                        entry.path,
+                        entry.blob,
+                        old["category"],
+                        old.get("module"),
+                        old["method"],
+                        old["lines"],
+                        old.get("masks", {}),
+                        [
+                            PreparedChunk(
+                                row["start_line"], row["end_line"], row["body"]
+                            )
+                            for row in chunks
+                        ],
+                    )
+                    reused += 1
+                else:
+                    prepared = await asyncio.to_thread(
+                        prepare_entry, git, entry, source["role"], protected, tmp
+                    )
                 await replace_file(db.query_raw, source_id, snapshot, prepared, lock)
                 categories[prepared.category] += 1
                 masks.update(prepared.masks)
@@ -103,6 +153,7 @@ async def _sync_locked(
         return {
             "commit": commit,
             "files": len(entries),
+            "reused": reused,
             "by_category": dict(categories),
             "masks": dict(masks),
         }
