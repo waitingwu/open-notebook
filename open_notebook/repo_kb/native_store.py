@@ -79,9 +79,10 @@ async def activate_snapshot(
         BEGIN TRANSACTION;
         __GUARD__
         LET $s = SELECT * FROM ONLY $source;
+        LET $knowledge_base = SELECT * FROM ONLY $kb;
         LET $snapshot_row = SELECT * FROM ONLY $snapshot;
         LET $files = SELECT count() AS total FROM repo_file WHERE snapshot = $snapshot GROUP ALL;
-        IF $s = NONE OR $s.kb != $kb OR $snapshot_row = NONE OR $snapshot_row.source != $source OR $snapshot_row.commit_sha != $commit OR $snapshot_row.ready = true OR ($files[0].total ?? 0) != $file_count {
+        IF $knowledge_base = NONE OR $s = NONE OR $s.kb != $kb OR $snapshot_row = NONE OR $snapshot_row.source != $source OR $snapshot_row.commit_sha != $commit OR $snapshot_row.ready = true OR ($files[0].total ?? 0) != $file_count {
             THROW 'Invalid snapshot activation';
         };
         UPDATE $snapshot SET ready = true, file_count = $file_count;
