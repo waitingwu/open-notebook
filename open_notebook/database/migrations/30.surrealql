@@ -26,10 +26,20 @@ DEFINE FIELD IF NOT EXISTS file_count ON repo_source TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS by_category ON repo_source FLEXIBLE TYPE object DEFAULT {};
 DEFINE FIELD IF NOT EXISTS status ON repo_source TYPE string DEFAULT 'never';
 DEFINE FIELD IF NOT EXISTS last_error ON repo_source TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS current_snapshot ON repo_source TYPE option<record<repo_source_snapshot>>;
 DEFINE INDEX IF NOT EXISTS repo_source_name ON repo_source FIELDS kb, name UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS repo_source_snapshot SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS source ON repo_source_snapshot TYPE record<repo_source>;
+DEFINE FIELD IF NOT EXISTS commit_sha ON repo_source_snapshot TYPE string;
+DEFINE FIELD IF NOT EXISTS ready ON repo_source_snapshot TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS file_count ON repo_source_snapshot TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS created ON repo_source_snapshot TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS repo_source_snapshot_source ON repo_source_snapshot FIELDS source;
 
 DEFINE TABLE IF NOT EXISTS repo_file SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS source ON repo_file TYPE record<repo_source>;
+DEFINE FIELD IF NOT EXISTS snapshot ON repo_file TYPE record<repo_source_snapshot>;
 DEFINE FIELD IF NOT EXISTS path ON repo_file TYPE string;
 DEFINE FIELD IF NOT EXISTS blob ON repo_file TYPE string;
 DEFINE FIELD IF NOT EXISTS category ON repo_file TYPE string;
@@ -40,11 +50,12 @@ DEFINE FIELD IF NOT EXISTS last_date ON repo_file TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS lines ON repo_file TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS masks ON repo_file FLEXIBLE TYPE object DEFAULT {};
 DEFINE FIELD IF NOT EXISTS converted ON repo_file TYPE bool DEFAULT false;
-DEFINE INDEX IF NOT EXISTS repo_file_path ON repo_file FIELDS source, path UNIQUE;
+DEFINE INDEX IF NOT EXISTS repo_file_path ON repo_file FIELDS source, snapshot, path UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS repo_chunk SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS file ON repo_chunk TYPE record<repo_file>;
 DEFINE FIELD IF NOT EXISTS source ON repo_chunk TYPE record<repo_source>;
+DEFINE FIELD IF NOT EXISTS snapshot ON repo_chunk TYPE record<repo_source_snapshot>;
 DEFINE FIELD IF NOT EXISTS path ON repo_chunk TYPE string;
 DEFINE FIELD IF NOT EXISTS category ON repo_chunk TYPE string;
 DEFINE FIELD IF NOT EXISTS start_line ON repo_chunk TYPE int;

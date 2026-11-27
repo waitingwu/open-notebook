@@ -13,5 +13,6 @@ REMOVE TABLE IF EXISTS repo_wiki_section;
 REMOVE TABLE IF EXISTS repo_wiki_page;
 REMOVE TABLE IF EXISTS repo_chunk;
 REMOVE TABLE IF EXISTS repo_file;
+REMOVE TABLE IF EXISTS repo_source_snapshot;
 REMOVE TABLE IF EXISTS repo_source;
 REMOVE TABLE IF EXISTS repo_kb;
