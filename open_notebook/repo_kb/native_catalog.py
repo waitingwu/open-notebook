@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import asdict
 from typing import Any, Awaitable, Callable, Optional
@@ -68,8 +69,8 @@ async def create_source(
         raise ValueError("Invalid source name")
     if role not in {"doc", "src"}:
         raise ValueError("Invalid source role")
-    root = validate_source_path(
-        path, allowed_roots=allowed_roots, data_roots=data_roots
+    root = await asyncio.to_thread(
+        validate_source_path, path, allowed_roots=allowed_roots, data_roots=data_roots
     )
     result = await query(
         "CREATE repo_source CONTENT $data;",

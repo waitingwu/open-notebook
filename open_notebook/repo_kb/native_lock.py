@@ -9,7 +9,17 @@ from typing import Any, Awaitable, Callable
 
 from surrealdb import RecordID
 
+from open_notebook.exceptions import ConflictError
+
 Query = Callable[[str, dict[str, Any]], Awaitable[Any]]
+
+
+class KnowledgeBaseBusy(ConflictError):
+    def __init__(self, job_id: str | None = None):
+        super().__init__(
+            "A knowledge base write operation is already queued or running"
+        )
+        self.job_id = job_id
 
 
 @dataclass(frozen=True)
@@ -57,7 +67,15 @@ async def acquire(query: Query, kb: RecordID) -> WriteLock:
         UPSERT $lock SET kb = $lock_kb, token = $lock_token, expires = time::now() + 5m;
         COMMIT TRANSACTION;
     """
-    await _execute(query, sql, lock.params())
+    try:
+        await _execute(query, sql, lock.params())
+    except RuntimeError as exc:
+        response = await query("SELECT job_id FROM ONLY $id;", {"id": lock.id})
+        entries = response.get("result", [])
+        row = entries[-1].get("result") if entries else None
+        if isinstance(row, dict):
+            raise KnowledgeBaseBusy(row.get("job_id")) from exc
+        raise
     return lock
 
 

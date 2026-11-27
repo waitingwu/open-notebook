@@ -81,6 +81,7 @@ class ExecuteChatRequest(BaseModel):
     model_override: Optional[str] = Field(
         None, description="Optional model override for this message"
     )
+    disabled_repo_kbs: List[str] = Field(default_factory=list, max_length=8)
 
 
 class ExecuteChatResponse(BaseModel):
@@ -349,6 +350,19 @@ async def execute_chat(request: ExecuteChatRequest):
         state_values["context"] = request.context
         state_values["notebook"] = notebook
         state_values["model_override"] = model_override
+        state_values["repo_context"] = None
+        if notebook and notebook.id:
+            from open_notebook.database.repository import db_connection
+            from open_notebook.repo_kb.retrieve import notebook_context
+
+            async with db_connection() as db:
+                state_values["repo_context"] = await notebook_context(
+                    db,
+                    str(notebook.id),
+                    request.message,
+                    model_override,
+                    request.disabled_repo_kbs,
+                )
 
         # Add user message to state
         from langchain_core.messages import HumanMessage

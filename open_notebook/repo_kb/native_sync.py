@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable, Protocol
 from surrealdb import RecordID
 
 from open_notebook.repo_kb.gitsource import GitRepo
+from open_notebook.repo_kb.native_db import transaction
 from open_notebook.repo_kb.native_ingest import (
     PreparedChunk,
     PreparedFile,
@@ -41,6 +42,7 @@ async def sync_source(
     data_roots: list[str],
     progress: Progress | None = None,
     incremental: bool = True,
+    reserved_lock: WriteLock | None = None,
 ) -> dict[str, Any]:
     """Stage a source and activate it only after all writes succeed.
 
@@ -51,7 +53,7 @@ async def sync_source(
     source = await db.query("SELECT * FROM ONLY $id;", {"id": source_id})
     if not isinstance(source, dict) or not source.get("enabled"):
         raise ValueError("Source is missing or disabled")
-    lock = await acquire(db.query_raw, source["kb"])
+    lock = reserved_lock or await acquire(db.query_raw, source["kb"])
     try:
         current = await db.query("SELECT * FROM ONLY $id;", {"id": source_id})
         if (
@@ -71,7 +73,8 @@ async def sync_source(
             incremental,
         )
     finally:
-        await release(db.query_raw, lock)
+        if reserved_lock is None:
+            await release(db.query_raw, lock)
 
 
 async def _sync_locked(
@@ -147,6 +150,19 @@ async def _sync_locked(
                         modified += 1
                     else:
                         added += 1
+                    await transaction(
+                        db,
+                        "CREATE repo_access_log CONTENT $entry;",
+                        {
+                            "entry": {
+                                "source": source_id,
+                                "path": entry.path,
+                                "blob": entry.blob,
+                                "action": "read",
+                            }
+                        },
+                        lock,
+                    )
                     prepared = await asyncio.to_thread(
                         prepare_entry, git, entry, source["role"], protected, tmp
                     )

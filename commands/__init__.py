@@ -21,6 +21,7 @@ from .embedding_commands import (
     rebuild_embeddings_command,
 )
 from .podcast_commands import generate_podcast_command
+from .repo_kb_commands import repo_kb_job
 from .source_commands import process_source_command
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     # Other commands
     "generate_podcast_command",
     "process_source_command",
+    "repo_kb_job",
 ]

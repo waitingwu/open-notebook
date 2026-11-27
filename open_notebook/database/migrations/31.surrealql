@@ -1,0 +1,5 @@
+-- Fields added after the initial native KB migration was exercised locally.
+DEFINE FIELD IF NOT EXISTS health ON repo_kb FLEXIBLE TYPE object DEFAULT {};
+DEFINE FIELD IF NOT EXISTS average_length ON repo_search_generation TYPE float DEFAULT 1.0;
+UPDATE repo_kb SET health=health ?? {};
+UPDATE repo_search_generation SET average_length=average_length ?? 1.0;

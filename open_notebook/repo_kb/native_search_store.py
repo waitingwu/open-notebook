@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Awaitable, Callable, Iterable
 from uuid import uuid4
 
@@ -42,12 +43,26 @@ async def build_generation(
         for target, _ in values
     ):
         raise ValueError("Unsupported search target")
-    count, postings = compile_postings(body for _, body in values)
+    count, postings = await asyncio.to_thread(
+        compile_postings, (body for _, body in values)
+    )
     generation = RecordID("repo_search_generation", uuid4().hex)
+    kb_row = await _run(query, "SELECT * FROM ONLY $id;", {"id": kb})
+    policy_version = kb_row.get("policy_version", 0) if isinstance(kb_row, dict) else 0
     await _run(
         query,
         "CREATE $id CONTENT $data;",
-        {"id": generation, "data": {"kb": kb, "document_count": count}},
+        {
+            "id": generation,
+            "data": {
+                "kb": kb,
+                "document_count": count,
+                "policy_version": policy_version,
+                "average_length": float(
+                    sum(len(body) for _, body in values) / max(1, len(values))
+                ),
+            },
+        },
     )
     doc_rows = [
         {
@@ -88,6 +103,11 @@ async def publish_generation(query: Query, kb: RecordID, generation: RecordID) -
     row = await _run(query, "SELECT * FROM ONLY $id;", {"id": generation})
     if not isinstance(row, dict) or row.get("kb") != kb or row.get("ready") is not True:
         raise ValueError("Search generation does not belong to this knowledge base")
+    kb_row = await _run(query, "SELECT * FROM ONLY $id;", {"id": kb})
+    if not isinstance(kb_row, dict) or row.get("policy_version", 0) != kb_row.get(
+        "policy_version", 0
+    ):
+        raise ValueError("Knowledge base policy changed during index construction")
     result = await _run(
         query,
         "UPDATE $kb SET search_generation = $generation;",
@@ -115,6 +135,7 @@ async def candidate_targets(query: Query, kb: RecordID, text: str) -> list[Recor
         not isinstance(gen_row, dict)
         or gen_row.get("kb") != kb
         or gen_row.get("ready") is not True
+        or gen_row.get("policy_version", 0) != kb_row.get("policy_version", 0)
     ):
         return []
     terms = grams(text)

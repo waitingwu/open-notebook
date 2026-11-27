@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 from open_notebook.ai.provision import provision_langchain_model
 from open_notebook.config import LANGGRAPH_CHECKPOINT_FILE
@@ -25,12 +25,19 @@ class ThreadState(TypedDict):
     context: Optional[str]
     context_config: Optional[dict]
     model_override: Optional[str]
+    repo_context: NotRequired[Optional[str]]
 
 
 def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict:
     try:
         system_prompt = Prompter(prompt_template="chat/system").render(data=state)  # type: ignore[arg-type]
         payload = [SystemMessage(content=system_prompt)] + state.get("messages", [])
+        if state.get("repo_context"):
+            from open_notebook.repo_kb.retrieve import ANSWER_SYSTEM
+
+            payload.insert(
+                1, SystemMessage(content=ANSWER_SYSTEM + "\n" + state["repo_context"])
+            )
         model_id = config.get("configurable", {}).get("model_id") or state.get(
             "model_override"
         )

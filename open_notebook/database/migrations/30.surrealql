@@ -9,6 +9,8 @@ DEFINE FIELD IF NOT EXISTS updated ON repo_kb TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS last_build_at ON repo_kb TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_build_commit_set ON repo_kb FLEXIBLE TYPE object DEFAULT {};
 DEFINE FIELD IF NOT EXISTS stale ON repo_kb TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS policy_version ON repo_kb TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS health ON repo_kb FLEXIBLE TYPE object DEFAULT {};
 DEFINE FIELD IF NOT EXISTS search_generation ON repo_kb TYPE option<record<repo_search_generation>>;
 
 DEFINE TABLE IF NOT EXISTS repo_source SCHEMAFULL;
@@ -25,6 +27,7 @@ DEFINE FIELD IF NOT EXISTS last_synced_at ON repo_source TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS file_count ON repo_source TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS by_category ON repo_source FLEXIBLE TYPE object DEFAULT {};
 DEFINE FIELD IF NOT EXISTS status ON repo_source TYPE string DEFAULT 'never';
+DEFINE FIELD IF NOT EXISTS needs_full ON repo_source TYPE bool DEFAULT false;
 DEFINE FIELD IF NOT EXISTS last_error ON repo_source TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS current_snapshot ON repo_source TYPE option<record<repo_source_snapshot>>;
 DEFINE INDEX IF NOT EXISTS repo_source_name ON repo_source FIELDS kb, name UNIQUE;
@@ -75,6 +78,11 @@ DEFINE FIELD IF NOT EXISTS content_hash ON repo_wiki_page TYPE string;
 DEFINE FIELD IF NOT EXISTS citations ON repo_wiki_page FLEXIBLE TYPE array<object> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS generated_by ON repo_wiki_page TYPE string;
 DEFINE FIELD IF NOT EXISTS updated ON repo_wiki_page TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS stale ON repo_wiki_page TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS revision ON repo_wiki_page TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS model ON repo_wiki_page TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS source_commits ON repo_wiki_page FLEXIBLE TYPE object DEFAULT {};
+DEFINE FIELD IF NOT EXISTS dependencies ON repo_wiki_page FLEXIBLE TYPE array<object> DEFAULT [];
 DEFINE INDEX IF NOT EXISTS repo_wiki_page_slug ON repo_wiki_page FIELDS kb, slug UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS repo_wiki_section SCHEMAFULL;
@@ -90,12 +98,13 @@ DEFINE FIELD IF NOT EXISTS kb ON repo_discrepancy TYPE record<repo_kb>;
 DEFINE FIELD IF NOT EXISTS module ON repo_discrepancy TYPE string;
 DEFINE FIELD IF NOT EXISTS program ON repo_discrepancy TYPE string;
 DEFINE FIELD IF NOT EXISTS kind ON repo_discrepancy TYPE string;
+DEFINE FIELD IF NOT EXISTS fingerprint ON repo_discrepancy TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS spec_cite ON repo_discrepancy TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS code_cite ON repo_discrepancy TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS summary ON repo_discrepancy TYPE string;
 DEFINE FIELD IF NOT EXISTS status ON repo_discrepancy TYPE string DEFAULT 'open';
 DEFINE FIELD IF NOT EXISTS note ON repo_discrepancy TYPE option<string>;
-DEFINE INDEX IF NOT EXISTS repo_discrepancy_key ON repo_discrepancy FIELDS kb, module, program, kind UNIQUE;
+DEFINE INDEX IF NOT EXISTS repo_discrepancy_key ON repo_discrepancy FIELDS kb, fingerprint UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS repo_kb_event SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS kb ON repo_kb_event TYPE record<repo_kb>;
@@ -120,6 +129,7 @@ DEFINE FIELD IF NOT EXISTS citations ON repo_wiki_revision FLEXIBLE TYPE array<o
 DEFINE FIELD IF NOT EXISTS generated_by ON repo_wiki_revision TYPE string;
 DEFINE FIELD IF NOT EXISTS model ON repo_wiki_revision TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS source_commits ON repo_wiki_revision FLEXIBLE TYPE object DEFAULT {};
+DEFINE FIELD IF NOT EXISTS dependencies ON repo_wiki_revision FLEXIBLE TYPE array<object> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS created ON repo_wiki_revision TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS repo_wiki_revision_key ON repo_wiki_revision FIELDS page, revision UNIQUE;
 
@@ -132,6 +142,8 @@ DEFINE FIELD IF NOT EXISTS author ON repo_wiki_note TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS created ON repo_wiki_note TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS updated ON repo_wiki_note TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS stale ON repo_wiki_note TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS citations ON repo_wiki_note FLEXIBLE TYPE array<object> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS dependencies ON repo_wiki_note FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE TABLE IF NOT EXISTS repo_wiki_export SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS kb ON repo_wiki_export TYPE record<repo_kb>;
@@ -158,6 +170,29 @@ DEFINE TABLE IF NOT EXISTS repo_kb_lock SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS kb ON repo_kb_lock TYPE record<repo_kb>;
 DEFINE FIELD IF NOT EXISTS token ON repo_kb_lock TYPE string;
 DEFINE FIELD IF NOT EXISTS expires ON repo_kb_lock TYPE datetime;
+DEFINE FIELD IF NOT EXISTS job_id ON repo_kb_lock TYPE option<string>;
+
+DEFINE TABLE IF NOT EXISTS repo_kb_job SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS kb ON repo_kb_job TYPE record<repo_kb>;
+DEFINE FIELD IF NOT EXISTS source ON repo_kb_job TYPE option<record<repo_source>>;
+DEFINE FIELD IF NOT EXISTS kind ON repo_kb_job TYPE string;
+DEFINE FIELD IF NOT EXISTS status ON repo_kb_job TYPE string DEFAULT 'queued';
+DEFINE FIELD IF NOT EXISTS command_id ON repo_kb_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS lock_token ON repo_kb_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS options ON repo_kb_job FLEXIBLE TYPE object DEFAULT {};
+DEFINE FIELD IF NOT EXISTS progress ON repo_kb_job FLEXIBLE TYPE object DEFAULT {};
+DEFINE FIELD IF NOT EXISTS result ON repo_kb_job FLEXIBLE TYPE object DEFAULT {};
+DEFINE FIELD IF NOT EXISTS error ON repo_kb_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS cancel_requested ON repo_kb_job TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS created ON repo_kb_job TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated ON repo_kb_job TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS repo_kb_job_kb ON repo_kb_job FIELDS kb;
+DEFINE INDEX IF NOT EXISTS repo_kb_job_command ON repo_kb_job FIELDS command_id;
+
+DEFINE TABLE IF NOT EXISTS repo_kb_batch SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS items ON repo_kb_batch FLEXIBLE TYPE array<object> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS cancelled ON repo_kb_batch TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS created ON repo_kb_batch TYPE datetime DEFAULT time::now();
 
 -- Compact application-built inverted index. A generation is made visible only
 -- after all its documents and postings have been written successfully.
@@ -166,6 +201,8 @@ DEFINE FIELD IF NOT EXISTS kb ON repo_search_generation TYPE record<repo_kb>;
 DEFINE FIELD IF NOT EXISTS created ON repo_search_generation TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS document_count ON repo_search_generation TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS ready ON repo_search_generation TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS policy_version ON repo_search_generation TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS average_length ON repo_search_generation TYPE float DEFAULT 1.0;
 
 DEFINE TABLE IF NOT EXISTS repo_search_document SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS generation ON repo_search_document TYPE record<repo_search_generation>;

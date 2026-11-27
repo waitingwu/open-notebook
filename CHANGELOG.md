@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — CaBook native repository knowledge bases
+
+- Add database-backed repository configuration, protected exclusions with immediate derived-content cleanup, background sync, and incremental import without writing to source repositories.
+- Add a versioned wiki browser, citation lookup, keyword search, manual notes, manual rule/flow compilation, notebook mounts, and validated answer-to-wiki saving. The keyword index uses compressed application-built postings stored in SurrealDB; no embedding model is required.
+- Add optional one-way Markdown Git export and ZIP download. Source repositories cannot be export targets. The local Multica preview uses an isolated database.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

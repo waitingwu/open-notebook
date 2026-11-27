@@ -50,6 +50,7 @@ from api.routers import (
     notes,
     podcasts,
     providers,
+    repo_kb,
     search,
     settings,
     source_chat,
@@ -404,9 +405,10 @@ async def invalid_input_error_handler(request: Request, exc: InvalidInputError):
 
 @app.exception_handler(ConflictError)
 async def conflict_error_handler(request: Request, exc: ConflictError):
+    job_id = getattr(exc, "job_id", None)
     return JSONResponse(
         status_code=409,
-        content={"detail": str(exc)},
+        content={"detail": str(exc), **({"job_id": job_id} if job_id else {})},
         headers=_cors_headers(request),
     )
 
@@ -503,6 +505,7 @@ app.include_router(capabilities.router, prefix="/api", tags=["capabilities"])
 app.include_router(languages.router, prefix="/api", tags=["languages"])
 app.include_router(local_cli.router, prefix="/api", tags=["local-cli"])
 app.include_router(audit.router, prefix="/api", tags=["audit"])
+app.include_router(repo_kb.router, prefix="/api", tags=["repo-kb"])
 
 
 @app.get("/")

@@ -22,7 +22,7 @@ import json
 import os
 import re
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from open_notebook.repo_kb.classify import APP_SQL, CODE, DDL, DIAGRAM, SOP, SPEC
 from open_notebook.repo_kb.config import KBConfig
@@ -68,8 +68,9 @@ def _ops_zh(s: str) -> str:
 class KB:
     """In-memory model built from the store (cheap to rebuild)."""
 
-    def __init__(self, store: Store):
+    def __init__(self, store: Any, read_text: Optional[Callable[[Any], str]] = None):
         self.store = store
+        self.read_text = read_text or (lambda row: _read(store, row))
         self.tables: Dict[str, Tuple[Table, Any]] = {}
         self.specs: List[Tuple[Spec, Any]] = []
         self.classes: Dict[str, Dict[str, Any]] = {}
@@ -79,7 +80,7 @@ class KB:
     def _load(self) -> None:
         st = self.store
         for row in st.files(category=DDL):
-            for tb in parse_ddl(_read(st, row), row["path"]):
+            for tb in parse_ddl(self.read_text(row), row["path"]):
                 prev = self.tables.get(tb.name)
                 if (
                     prev is None
@@ -93,7 +94,7 @@ class KB:
             if not row["path"].endswith(".java") or not row["mirror"]:
                 continue
             name = row["path"].rsplit("/", 1)[-1][:-5]
-            src = _read(st, row)
+            src = self.read_text(row)
             refs = java_refs(src, known)
             self.classes[name] = {
                 "row": row,
@@ -112,7 +113,7 @@ class KB:
                 cls = parts[5]
             if not cls:
                 continue
-            sql = _read(st, row)
+            sql = self.read_text(row)
             c = self.classes.setdefault(
                 cls,
                 {
@@ -155,7 +156,7 @@ class KB:
                     c["lines"][t] = (row, ln)
         for row in st.files(repo=None, category=SPEC):
             if row["mirror"]:
-                self.specs.append((parse_spec(_read(st, row), row["path"]), row))
+                self.specs.append((parse_spec(self.read_text(row), row["path"]), row))
         for row in st.files():
             m = re.search(r"/AV影像系統/([A-Z][0-9A-Z])_([^/]+)/", row["path"])
             if m:

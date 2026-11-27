@@ -6,7 +6,7 @@ import pytest
 from surrealdb import AsyncSurreal, RecordID
 
 from open_notebook.database.async_migrate import AsyncMigrationManager
-from open_notebook.repo_kb.native_lock import acquire, release
+from open_notebook.repo_kb.native_lock import KnowledgeBaseBusy, acquire, release
 from open_notebook.repo_kb.native_store import create_snapshot
 
 
@@ -25,7 +25,7 @@ async def test_exclusive_lease_and_stale_worker_fencing() -> None:
             {"id": source, "kb": kb},
         )
         first = await acquire(db.query_raw, kb)
-        with pytest.raises(RuntimeError):
+        with pytest.raises(KnowledgeBaseBusy):
             await acquire(db.query_raw, kb)
         await db.query("UPDATE $id SET expires=time::now()-1s;", {"id": first.id})
         second = await acquire(db.query_raw, kb)
