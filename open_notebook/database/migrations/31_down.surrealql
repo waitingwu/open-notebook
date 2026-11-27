@@ -1,0 +1,2 @@
+REMOVE FIELD IF EXISTS average_length ON repo_search_generation;
+REMOVE FIELD IF EXISTS health ON repo_kb;

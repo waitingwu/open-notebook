@@ -103,7 +103,7 @@ export function SessionManager({
 
   return (
     <>
-      <Card className="h-full flex flex-col">
+      <Card className="h-full min-h-0 flex flex-col">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center justify-between">
             <span className="flex items-center gap-2">

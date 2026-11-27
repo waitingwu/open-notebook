@@ -40,6 +40,7 @@ import {
   Plus,
   Wrench,
   Command,
+  Activity,
 } from 'lucide-react'
 
 const getNavigation = (t: TFunction) => [
@@ -47,6 +48,7 @@ const getNavigation = (t: TFunction) => [
     title: t('navigation.collect'),
     items: [
       { name: t('navigation.sources'), href: '/sources', icon: FileText, iconClass: 'text-sage' },
+      { name: t('repoKb.title'), href: '/repo-kb', icon: Book, iconClass: 'text-sage' },
     ],
   },
   {
@@ -66,6 +68,7 @@ const getNavigation = (t: TFunction) => [
     title: t('navigation.manage'),
     items: [
       { name: t('navigation.models'), href: '/settings/models', icon: Bot, iconClass: undefined },
+      { name: t('navigation.aiAudit'), href: '/ai-audit', icon: Activity, iconClass: undefined },
       { name: t('navigation.transformations'), href: '/transformations', icon: Shuffle, iconClass: undefined },
       { name: t('navigation.settings'), href: '/settings', icon: Settings, iconClass: undefined },
       { name: t('navigation.advanced'), href: '/advanced', icon: Wrench, iconClass: undefined },

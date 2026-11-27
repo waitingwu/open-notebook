@@ -2,7 +2,8 @@ from esperanto import LanguageModel
 from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from open_notebook.ai.models import model_manager
+from open_notebook.ai.models import LocalCLIModelHandle, model_manager
+from open_notebook.audit.recorder import AuditCallbackHandler
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils import token_count
 
@@ -47,6 +48,13 @@ async def provision_langchain_model(
             f"Please go to Manage → Models and configure a default model for '{default_type}'."
         )
 
+    if isinstance(model, LocalCLIModelHandle):
+        lc_model = model.to_langchain()
+        _attach_audit(
+            lc_model, model.provider, model.model_name, model.model_id, default_type
+        )
+        return lc_model
+
     if not isinstance(model, LanguageModel):
         logger.error(
             f"Model type mismatch: Expected LanguageModel but got {type(model).__name__}. "
@@ -58,4 +66,32 @@ async def provision_langchain_model(
             f"Please check that the model configured for '{default_type}' is a language model, not an embedding or speech model."
         )
 
-    return model.to_langchain()
+    lc_model = model.to_langchain()
+    _attach_audit(
+        lc_model,
+        str(getattr(model, "provider", "unknown")),
+        str(getattr(model, "model_name", "unknown")),
+        model_id,
+        default_type,
+    )
+    return lc_model
+
+
+def _attach_audit(
+    lc_model: BaseChatModel,
+    provider: str,
+    model_name: str,
+    model_id: str | None,
+    feature: str,
+) -> None:
+    """Record every call of this model instance in the AI audit log."""
+    try:
+        handler = AuditCallbackHandler(provider, model_name, model_id, feature)
+        existing = (
+            list(lc_model.callbacks or [])
+            if isinstance(lc_model.callbacks, list)
+            else []
+        )
+        lc_model.callbacks = existing + [handler]
+    except Exception as e:  # auditing must never break a chat
+        logger.warning(f"Could not attach audit handler: {e}")

@@ -10,8 +10,15 @@ const allowedDevOrigins = process.env.NEXT_ALLOWED_DEV_ORIGINS
   : undefined;
 
 const nextConfig: NextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   // Enable standalone output for optimized Docker deployment
   output: "standalone",
+
+  // Next's built-in gzip compression buffers streamed responses, so the SSE
+  // chat proxies (src/app/api/_sse-proxy.ts) delivered every token at once
+  // when the answer finished. Turn it off; put a reverse proxy in front if
+  // you need compression for static assets.
+  compress: false,
 
   ...(allowedDevOrigins && allowedDevOrigins.length > 0 ? { allowedDevOrigins } : {}),
 

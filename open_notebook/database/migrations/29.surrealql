@@ -1,0 +1,15 @@
+-- Migration 29: AI audit log (local CLI runtimes and API providers).
+-- ai_run: one row per chat-model call. Stores metadata only — never prompts,
+--   source text, answers or credentials (see open_notebook/audit/recorder.py).
+-- ai_run_event: ordered lifecycle events of a run (status / error names only).
+-- ai_usage: token usage per (run, model).
+-- ai_rate_limit: latest subscription rate-limit snapshot per provider.
+DEFINE TABLE IF NOT EXISTS ai_run SCHEMALESS;
+DEFINE INDEX IF NOT EXISTS idx_ai_run_started ON TABLE ai_run COLUMNS started_at;
+DEFINE INDEX IF NOT EXISTS idx_ai_run_provider ON TABLE ai_run COLUMNS provider, started_at;
+DEFINE TABLE IF NOT EXISTS ai_run_event SCHEMALESS;
+DEFINE INDEX IF NOT EXISTS idx_ai_run_event_run ON TABLE ai_run_event COLUMNS run, seq;
+DEFINE INDEX IF NOT EXISTS idx_ai_run_event_created ON TABLE ai_run_event COLUMNS created;
+DEFINE TABLE IF NOT EXISTS ai_usage SCHEMALESS;
+DEFINE INDEX IF NOT EXISTS idx_ai_usage_run ON TABLE ai_usage COLUMNS run;
+DEFINE TABLE IF NOT EXISTS ai_rate_limit SCHEMALESS;

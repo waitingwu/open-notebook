@@ -15,7 +15,7 @@ Behavior notes:
 from typing import Any, Iterable, List, Optional, Tuple
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import ChatSession, Source
@@ -27,6 +27,14 @@ class ChatMessage(BaseModel):
     type: str = Field(..., description="Message type (human|ai)")
     content: str = Field(..., description="Message content")
     timestamp: Optional[str] = Field(None, description="Message timestamp")
+    repo_citations: dict[str, bool] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        data = handler(self)
+        if not self.repo_citations:
+            data.pop("repo_citations", None)
+        return data
 
 
 class SuccessResponse(BaseModel):

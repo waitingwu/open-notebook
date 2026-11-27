@@ -1,4 +1,5 @@
 import asyncio
+import re
 import traceback
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -29,6 +30,39 @@ from open_notebook.utils.graph_utils import (
 )
 
 router = APIRouter()
+
+
+async def annotate_repo_citations(
+    messages: list[ChatMessage], notebook_id: str
+) -> None:
+    """Revalidate persisted replies too: current exclusions can revoke old refs."""
+    references = {
+        ref
+        for m in messages
+        if m.type == "ai"
+        for ref in re.findall(r"〔[^〔〕\n]+〕", m.content)
+    }
+    if not references:
+        return
+    from open_notebook.database.repository import db_connection
+    from open_notebook.repo_kb.native_cite import resolve
+    from open_notebook.repo_kb.native_management import mounts
+
+    async with db_connection() as db:
+        bases = await mounts(db, ensure_record_id(notebook_id))
+        validity = {}
+        for ref in references:
+            validity[ref] = False
+            for kb in bases:
+                if (await resolve(db, kb["id"], ref))["valid"]:
+                    validity[ref] = True
+                    break
+        for message in messages:
+            if message.type == "ai":
+                message.repo_citations = {
+                    ref: validity[ref]
+                    for ref in re.findall(r"〔[^〔〕\n]+〕", message.content)
+                }
 
 
 # Request/Response models
@@ -81,6 +115,7 @@ class ExecuteChatRequest(BaseModel):
     model_override: Optional[str] = Field(
         None, description="Optional model override for this message"
     )
+    disabled_repo_kbs: List[str] = Field(default_factory=list, max_length=8)
 
 
 class ExecuteChatResponse(BaseModel):
@@ -218,6 +253,9 @@ async def get_session(session_id: str):
 
         notebook_id = notebook_query[0]["out"] if notebook_query else None
 
+        if notebook_id:
+            await annotate_repo_citations(messages, str(notebook_id))
+
         if not notebook_id:
             # This might be an old session created before API migration
             logger.warning(
@@ -349,6 +387,33 @@ async def execute_chat(request: ExecuteChatRequest):
         state_values["context"] = request.context
         state_values["notebook"] = notebook
         state_values["model_override"] = model_override
+        state_values["repo_context"] = None
+        if notebook and notebook.id:
+            from open_notebook.database.repository import db_connection
+            from open_notebook.repo_kb.retrieve import notebook_context
+
+            async with db_connection() as db:
+                state_values["repo_context"] = await notebook_context(
+                    db,
+                    str(notebook.id),
+                    request.message,
+                    model_override,
+                    request.disabled_repo_kbs,
+                    session_id=full_session_id,
+                )
+                mounted = await db.query(
+                    "SELECT repo_kbs FROM ONLY $id;",
+                    {"id": ensure_record_id(str(notebook.id))},
+                )
+                used = [
+                    kb
+                    for kb in (mounted or {}).get("repo_kbs", [])
+                    if str(kb) not in request.disabled_repo_kbs
+                ]
+                await db.query(
+                    "UPDATE $id SET repo_kbs=array::union(repo_kbs ?? [], $kbs);",
+                    {"id": ensure_record_id(full_session_id), "kbs": used},
+                )
 
         # Add user message to state
         from langchain_core.messages import HumanMessage
@@ -371,7 +436,13 @@ async def execute_chat(request: ExecuteChatRequest):
                 configurable={
                     "thread_id": full_session_id,
                     "model_id": model_override,
-                }
+                },
+                metadata={
+                    "audit_feature": "notebook_chat",
+                    "audit_notebook_id": str(notebook.id)
+                    if notebook and notebook.id
+                    else None,
+                },
             ),
             user_message,
         )
@@ -381,6 +452,8 @@ async def execute_chat(request: ExecuteChatRequest):
 
         # Convert messages to response format
         messages = extract_chat_messages(result.get("messages", []))
+        if notebook and notebook.id and messages and messages[-1].type == "ai":
+            await annotate_repo_citations([messages[-1]], str(notebook.id))
 
         return ExecuteChatResponse(session_id=request.session_id, messages=messages)
     except NotFoundError:

@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, Clock } from 'lucide-react'
 import { MarkdownRenderer } from '@/components/ui/markdown-renderer'
+import { RepoMarkdown } from '@/components/common/RepoCitation'
+import { SaveRepoAnswer } from '@/components/common/RepoMounts'
 import {
   SourceChatMessage,
   SourceChatContextIndicator,
@@ -125,7 +127,7 @@ export function ChatPanel({
                 <Clock className="h-4 w-4" />
                 <span className="text-xs">{t('chat.sessions')}</span>
               </Button>
-              <DialogContent className="sm:max-w-[420px] p-0 overflow-hidden">
+              <DialogContent className="flex h-[min(80vh,640px)] flex-col overflow-hidden p-0 sm:max-w-[420px]">
                 <DialogTitle className="sr-only">{t('chat.sessionsTitle')}</DialogTitle>
                 <SessionManager
                   sessions={sessions}
@@ -161,6 +163,7 @@ export function ChatPanel({
                   key={message.id}
                   message={message}
                   notebookId={notebookId}
+                  sessionId={currentSessionId || undefined}
                   onReferenceClick={handleReferenceClick}
                 />
               ))
@@ -338,12 +341,14 @@ function ChatComposer({
 interface ChatMessageProps {
   message: SourceChatMessage
   notebookId?: string
+  sessionId?: string
   onReferenceClick: (type: string, id: string) => void
 }
 
 const ChatMessage = memo(function ChatMessage({
   message,
   notebookId,
+  sessionId,
   onReferenceClick
 }: ChatMessageProps) {
   return (
@@ -368,6 +373,7 @@ const ChatMessage = memo(function ChatMessage({
           }`}
         >
           {message.type === 'ai' ? (
+            notebookId && message.content.includes('〔') ? <RepoMarkdown notebook={notebookId} validity={message.repo_citations}>{message.content}</RepoMarkdown> :
             <AIMessageContent
               content={message.content}
               onReferenceClick={onReferenceClick}
@@ -382,6 +388,7 @@ const ChatMessage = memo(function ChatMessage({
             notebookId={notebookId}
           />
         )}
+        {message.type === 'ai' && notebookId && sessionId && message.content.includes('〔') && <SaveRepoAnswer notebook={notebookId} session={sessionId} message={message.id} />}
       </div>
       {message.type === 'human' && (
         <div className="flex-shrink-0">

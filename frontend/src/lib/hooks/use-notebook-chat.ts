@@ -21,9 +21,10 @@ interface UseNotebookChatParams {
   sources: SourceListResponse[]
   notes: NoteResponse[]
   contextSelections: ContextSelections
+  disabledRepoKBs?: string[]
 }
 
-export function useNotebookChat({ notebookId, sources, notes, contextSelections }: UseNotebookChatParams) {
+export function useNotebookChat({ notebookId, sources, notes, contextSelections, disabledRepoKBs }: UseNotebookChatParams) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
@@ -234,6 +235,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
         session_id: sessionId,
         message,
         context,
+        disabled_repo_kbs: disabledRepoKBs,
         model_override: modelOverride ?? (currentSession?.model_override ?? undefined)
       })
 
@@ -262,6 +264,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     pendingModelOverride,
     buildContext,
     refetchCurrentSession,
+    disabledRepoKBs,
     queryClient,
     t
   ])

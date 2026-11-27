@@ -71,7 +71,7 @@ class CommandService:
         """Get status of any command job"""
         try:
             status = await get_command_status(job_id)
-            return {
+            result = {
                 "job_id": job_id,
                 "status": status.status if status else "unknown",
                 "result": status.result if status else None,
@@ -86,6 +86,26 @@ class CommandService:
                 else None,
                 "progress": getattr(status, "progress", None) if status else None,
             }
+            from open_notebook.database.repository import repo_query
+
+            try:
+                repo_jobs = await repo_query(
+                    "SELECT status,progress,result,error FROM repo_kb_job WHERE command_id=$command LIMIT 1;",
+                    {"command": job_id},
+                )
+            except Exception:
+                repo_jobs = []  # Existing command status remains available during upgrades.
+            if repo_jobs:
+                row = repo_jobs[0]
+                result.update(
+                    {
+                        "status": row["status"],
+                        "progress": row.get("progress"),
+                        "result": row.get("result"),
+                        "error_message": row.get("error"),
+                    }
+                )
+            return result
         except Exception as e:
             logger.error(f"Failed to get command status: {e}")
             raise
