@@ -38,6 +38,7 @@ async def test_api_first_sync_confirmation_queue_lock_progress_and_worker(
         await db.use("repo_kb_api", "flow")
         await db.query("DEFINE TABLE notebook SCHEMAFULL;")
         await db.query(AsyncMigrationManager().up_migrations[29].sql)
+        await db.query(AsyncMigrationManager().up_migrations[30].sql)
         app = FastAPI()
         app.include_router(router, prefix="/api")
 

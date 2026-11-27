@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 import re
-from collections import defaultdict
 from typing import Any
 
 from surrealdb import RecordID
@@ -13,7 +12,7 @@ from open_notebook.repo_kb.native_access import check_policy_version, current_fi
 from open_notebook.repo_kb.native_db import query, visible_kb
 from open_notebook.repo_kb.native_pages import page_readable
 from open_notebook.repo_kb.native_search import grams
-from open_notebook.repo_kb.native_search_store import candidate_targets
+from open_notebook.repo_kb.native_search_store import ranked_targets
 
 
 def query_terms(text: str) -> list[str]:
@@ -53,23 +52,13 @@ async def search(
         return []
     count = max(1, generation["document_count"])
     terms = query_terms(text)
-    matches: dict[str, set[str]] = {}
-    scores: dict[str, float] = defaultdict(float)
-    for term in terms:
-        matches[term] = set(
-            str(value)
-            for value in await candidate_targets(
-                lambda sql, params: query(db, sql, params), kb_id, term
-            )
-        )
-        idf = math.log(
-            1 + (count - len(matches[term]) + 0.5) / (len(matches[term]) + 0.5)
-        )
-        for target in matches[term]:
-            scores[target] += idf
-    # Rank using posting-level IDF before fetching bodies; this bounds memory
-    # for common Chinese bigrams without reading an entire repository per turn.
-    targets = sorted(scores, key=lambda key: (-scores[key], str(key)))[:1000]
+    if not generation.get("ready") or generation.get("policy_version", 0) != kb.get(
+        "policy_version", 0
+    ):
+        return []
+    targets, frequencies = await ranked_targets(
+        lambda sql, params: query(db, sql, params), generation, terms
+    )
     files = {str(row["id"]): row for row in await current_files(db, kb_id)}
     pages = (
         await query(
@@ -79,14 +68,23 @@ async def search(
         )
         or []
     )
+    sources = {
+        str(s["id"]): s
+        for s in await query(
+            db, "SELECT * FROM repo_source WHERE kb=$kb;", {"kb": kb_id}
+        )
+        or []
+    }
     readable_pages = {
-        str(row["id"]): row for row in pages if await page_readable(db, kb_id, row)
+        str(row["id"]): row
+        for row in pages
+        if await page_readable(db, kb_id, row, sources)
     }
     metadata = (
         await query(
             db,
             "SELECT id,file,page,category FROM $ids;",
-            {"ids": [RecordID.parse(value) for value in targets]},
+            {"ids": targets},
         )
         if targets
         else []
@@ -118,7 +116,7 @@ async def search(
             if not tf:
                 continue
             positions.append(normalized.find(term))
-            df = len(matches[term])
+            df = frequencies[term]
             score += (
                 math.log(1 + (count - df + 0.5) / (df + 0.5))
                 * tf
@@ -132,6 +130,7 @@ async def search(
             "id": str(row["id"]),
             "body": body[offset : offset + 1200],
             "score": score,
+            "highlights": [term for term in terms if term in normalized],
         }
         file = files.get(str(row.get("file")))
         if file:
@@ -141,6 +140,8 @@ async def search(
                     "repo": file["repo"],
                     "category": file["category"],
                     "module": file.get("module"),
+                    "file_date": file.get("last_date"),
+                    "file_commit": file.get("last_commit"),
                     "ref": f"〔{file['repo']}:{file['path']}#L{row['start_line']}-L{row['end_line']}@{file['last_commit'][:10]}〕",
                 }
             )

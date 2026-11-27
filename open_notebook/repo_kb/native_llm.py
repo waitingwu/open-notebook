@@ -7,6 +7,7 @@ import json
 import time
 from typing import Any
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
@@ -44,7 +45,16 @@ async def invoke(
         prompt, model_id, "chat", max_tokens=8192
     )
     started = time.monotonic()
-    config = RunnableConfig(metadata={"audit_feature": feature})
+
+    class Timing(BaseCallbackHandler):
+        first_token: float | None = None
+
+        def on_llm_new_token(self, token: Any, **kwargs: Any) -> None:
+            if self.first_token is None:
+                self.first_token = time.monotonic() - started
+
+    timing = Timing()
+    config = RunnableConfig(metadata={"audit_feature": feature}, callbacks=[timing])
     if isinstance(model, LocalCLIChatModel):
         # Its runner kills and reaps its process group on deadline. Merely
         # cancelling LangChain's default thread-backed ainvoke would orphan it.
@@ -63,6 +73,9 @@ async def invoke(
     usage: dict[str, Any] = getattr(answer, "usage_metadata", None) or {}
     return mask_text(body)[0], {
         "seconds": round(time.monotonic() - started, 3),
+        "first_token_seconds": round(timing.first_token, 3)
+        if timing.first_token is not None
+        else None,
         "input_tokens": usage.get("input_tokens"),
         "output_tokens": usage.get("output_tokens"),
         "estimated_input_tokens": token_count(prompt),

@@ -15,7 +15,7 @@ from typing import Any
 
 from surrealdb import RecordID
 
-from open_notebook.exceptions import InvalidInputError
+from open_notebook.exceptions import ConfigurationError
 from open_notebook.repo_kb.native_access import check_policy_version
 from open_notebook.repo_kb.native_content import page as read_page
 from open_notebook.repo_kb.native_db import one, query, transaction
@@ -35,7 +35,7 @@ async def validate_config(db: Any, path: str, branch: str, subdir: str) -> str:
     for source in sources:
         other = Path(source["path"]).resolve()
         if root == other or other in root.parents or root in other.parents:
-            raise InvalidInputError(
+            raise ConfigurationError(
                 "The export repository must be separate from every source repository"
             )
     if (
@@ -45,15 +45,16 @@ async def validate_config(db: Any, path: str, branch: str, subdir: str) -> str:
             ["git", "check-ref-format", "--branch", branch], capture_output=True
         ).returncode
     ):
-        raise InvalidInputError("Invalid export branch")
+        raise ConfigurationError("Invalid export branch")
     parts = PurePosixPath(subdir)
     if (
         parts.is_absolute()
-        or any(p in {"..", ".git"} for p in parts.parts)
+        or subdir in {".", ".."}
+        or any(p.casefold() in {"..", ".git"} for p in parts.parts)
         or not subdir.strip("/")
         or "\\" in subdir
     ):
-        raise InvalidInputError(
+        raise ConfigurationError(
             "Export subfolder must be a relative folder outside .git"
         )
     return str(root)

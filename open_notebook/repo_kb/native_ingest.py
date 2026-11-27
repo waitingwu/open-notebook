@@ -46,6 +46,10 @@ def prepare_entry(
     text, method = extract(entry.path, git.read_blob(entry.blob), tmpdir)
     masks: dict[str, int] = {}
     if text is not None:
+        # Some Word/PDF converters emit NULs after the binary-text check.
+        # SurrealDB's CBOR response cannot encode them. Replace in place so
+        # source line numbering remains stable for citations.
+        text = text.replace("\x00", "\ufffd")
         text, masks = mask_text(text, is_code=ext_of(entry.path) in CODE_EXTS)
     category = classify(role, entry.path, text)
     lines = text.split("\n") if text is not None else []

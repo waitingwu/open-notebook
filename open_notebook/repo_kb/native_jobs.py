@@ -26,6 +26,42 @@ class JobCancelled(Exception):
     pass
 
 
+async def recover_expired_jobs(db: Any, kb: RecordID) -> None:
+    """Make interrupted work retryable after its fencing lease expires."""
+    rows = (
+        await query(
+            db,
+            "SELECT * FROM repo_kb_job WHERE kb=$kb AND status='running';",
+            {"kb": kb},
+        )
+        or []
+    )
+    for job in rows:
+        target = RecordID("repo_kb_lock", hashlib.sha256(str(kb).encode()).hexdigest())
+        await query(
+            db,
+            """BEGIN TRANSACTION;
+        LET $current=SELECT * FROM ONLY $lease_id;
+        IF $current=NONE OR $current.token!=$job_token OR $current.expires<=time::now() {
+            UPDATE $job SET status='failed',error='WorkerInterrupted',updated=time::now() WHERE status='running';
+            IF $is_sync AND ($current=NONE OR $current.expires<=time::now()) {
+                UPDATE repo_source SET status='error',last_error='WorkerInterrupted' WHERE kb=$kb AND status='syncing';
+            };
+            DELETE $lease_id WHERE token=$job_token;
+            DELETE repo_kb_lock:compiler WHERE token=$job_owner;
+        };
+        COMMIT TRANSACTION;""",
+            {
+                "lease_id": target,
+                "job": job["id"],
+                "job_token": job.get("lock_token"),
+                "job_owner": str(job["id"]),
+                "kb": kb,
+                "is_sync": job["kind"] in {"sync", "sync_batch"},
+            },
+        )
+
+
 async def submit_job(
     db: Any,
     kb_id: RecordID,
@@ -86,6 +122,21 @@ async def submit_job(
         )
         if not enqueue:
             return {"job_id": str(job_id)}
+        if kind in {"compile_rules", "compile_flows"}:
+            try:
+                await query(
+                    db,
+                    """BEGIN TRANSACTION;
+                LET $active = SELECT * FROM ONLY repo_kb_lock:compiler;
+                IF $active != NONE AND $active.expires > time::now() { THROW 'Compiler is busy'; };
+                UPSERT repo_kb_lock:compiler CONTENT {kb:$kb,token:$owner,job_id:$owner,expires:time::now()+24h};
+                COMMIT TRANSACTION;""",
+                    {"kb": kb_id, "owner": str(job_id)},
+                )
+            except RuntimeError as exc:
+                raise ConflictError(
+                    "Another compilation job or batch is active"
+                ) from exc
         # Registration and submission are library operations; keep their sync
         # database path off the API event loop.
         from surreal_commands import submit_command
@@ -106,6 +157,11 @@ async def submit_job(
     except Exception:
         if job_id:
             await query(db, "DELETE $id;", {"id": job_id})
+            await query(
+                db,
+                "DELETE repo_kb_lock:compiler WHERE token=$owner;",
+                {"owner": str(job_id)},
+            )
         await release(db.query_raw, lock)
         raise
 
@@ -129,6 +185,11 @@ async def cancel_job(db: Any, job_id: RecordID) -> dict[str, Any]:
             job["lock_token"],
         )
         await release(db.query_raw, lock)
+        await query(
+            db,
+            "DELETE repo_kb_lock:compiler WHERE token=$owner;",
+            {"owner": str(job_id)},
+        )
     return public_job(await one(db, job_id, "repo_kb_job"))
 
 
@@ -286,3 +347,8 @@ async def execute_job(db: Any, job_id: RecordID) -> dict[str, Any]:
         raise RuntimeError("Knowledge base job failed; see its error type") from None
     finally:
         await release(db.query_raw, lock)
+        await query(
+            db,
+            "DELETE repo_kb_lock:compiler WHERE token=$owner;",
+            {"owner": str(job_id)},
+        )

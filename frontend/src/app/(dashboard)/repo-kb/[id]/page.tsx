@@ -15,9 +15,30 @@ import {
 import { ExportDialog } from '../components/ExportDialog'
 import { AppShell } from '@/components/layout/AppShell'
 import { repoKbApi, SearchHit } from '@/lib/api/repo-kb'
-import { useRepoMutation } from '@/lib/hooks/use-repo-kb'
+import { useRepoMutation, useRepoJobs } from '@/lib/hooks/use-repo-kb'
 import { repoKbLabel } from '@/lib/repo-kb-labels'
 import { useTranslation } from '@/lib/hooks/use-translation'
+
+function HighlightSnippet({ body, terms }: { body: string; terms: string[] }) {
+  if (!terms.length) return <>{body}</>
+  const expression = new RegExp(
+    `(${terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+    'gi',
+  )
+  return (
+    <>
+      {body.split(expression).map((part, index) =>
+        index % 2 ? (
+          <mark key={index} className="bg-accent text-accent-foreground">
+            {part}
+          </mark>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  )
+}
 
 export default function KnowledgeBrowser({
   params,
@@ -32,6 +53,8 @@ export default function KnowledgeBrowser({
   const [submitted, setSubmitted] = useState('')
   const [sop, setSop] = useState(false)
   const [module, setModule] = useState('')
+  const [differenceModule, setDifferenceModule] = useState('')
+  const [differenceStatus, setDifferenceStatus] = useState('')
   const [reference, setReference] = useState<string | null>(null)
   const [note, setNote] = useState('')
   const [history, setHistory] = useState(false)
@@ -90,6 +113,10 @@ export default function KnowledgeBrowser({
     retry: false,
   })
   const mutate = useRepoMutation((fn: () => Promise<unknown>) => fn())
+  const jobs = useRepoJobs(kb)
+  const busy = jobs.data?.some((job) =>
+    ['queued', 'running'].includes(job.status),
+  )
   function navigate(next: string) {
     setSlug(next)
     setTab('wiki')
@@ -123,6 +150,11 @@ export default function KnowledgeBrowser({
                   ? new Date(base.data.last_build_at).toLocaleString()
                   : t('repoKb.never')}
               </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {Object.entries(base.data?.last_build_commit_set || {})
+                  .map(([name, commit]) => `${name}: ${commit.slice(0, 10)}`)
+                  .join(' · ')}
+              </p>
               {base.data?.stale && (
                 <p className="mt-2 text-destructive">{t('repoKb.stale')}</p>
               )}
@@ -141,7 +173,7 @@ export default function KnowledgeBrowser({
                 {t('repoKb.downloadZip')}
               </Button>
               <Button
-                disabled={mutate.isPending}
+                disabled={mutate.isPending || busy}
                 onClick={() => mutate.mutate(() => repoKbApi.build(kb))}
               >
                 {t('repoKb.build')}
@@ -155,6 +187,7 @@ export default function KnowledgeBrowser({
             {[
               ['orphan_pages', 'orphanPages'],
               ['invalid_citations', 'invalidCitations'],
+              ['stale_citations', 'staleCitations'],
               ['stale_llm_pages', 'stalePages'],
               ['uncovered_modules', 'uncoveredModules'],
             ].map(([key, label]) => (
@@ -267,7 +300,7 @@ export default function KnowledgeBrowser({
                       value={module}
                       onChange={(e) => setModule(e.target.value)}
                     >
-                      <option value="">{t('common.all')}</option>
+                      <option value="">{t('repoKb.all')}</option>
                       {modules.map((m) => (
                         <option key={m}>{m}</option>
                       ))}
@@ -298,7 +331,10 @@ export default function KnowledgeBrowser({
                         {hit.path || hit.title}
                       </button>
                       <pre className="whitespace-pre-wrap break-words font-sans text-sm text-muted-foreground">
-                        {hit.body}
+                        <HighlightSnippet
+                          body={hit.body}
+                          terms={hit.highlights || []}
+                        />
                       </pre>
                       {hit.ref && (
                         <button
@@ -317,58 +353,92 @@ export default function KnowledgeBrowser({
                   <h2 className="text-xl font-semibold">
                     {t('repoKb.discrepancies')}
                   </h2>
-                  {differences.data?.map((d) => (
-                    <article
-                      key={d.id}
-                      className="space-y-2 rounded-lg border p-4"
+                  <div className="flex gap-3">
+                    <select
+                      aria-label={t('repoKb.module')}
+                      className="rounded border bg-background p-2"
+                      value={differenceModule}
+                      onChange={(e) => setDifferenceModule(e.target.value)}
                     >
-                      <h3 className="font-medium">
-                        {d.module} · {d.program} · {d.kind}
-                      </h3>
-                      <RepoMarkdown kb={kb}>
-                        {d.summary +
-                          '\n\n' +
-                          [d.spec_cite, d.code_cite].filter(Boolean).join(' ')}
-                      </RepoMarkdown>
-                      <select
-                        aria-label={`${t('repoKb.state')} ${d.program}`}
-                        className="rounded border bg-background p-2"
-                        value={d.status}
-                        onChange={(e) =>
-                          mutate.mutate(() =>
-                            repoKbApi.markDiscrepancy(
-                              kb,
-                              d.id,
-                              e.target.value,
-                              d.note || '',
-                            ),
-                          )
-                        }
+                      <option value="">{t('repoKb.all')}</option>
+                      {modules.map((m) => (
+                        <option key={m}>{m}</option>
+                      ))}
+                    </select>
+                    <select
+                      aria-label={t('repoKb.state')}
+                      className="rounded border bg-background p-2"
+                      value={differenceStatus}
+                      onChange={(e) => setDifferenceStatus(e.target.value)}
+                    >
+                      <option value="">{t('repoKb.all')}</option>
+                      {['open', 'confirmed', 'dismissed'].map((s) => (
+                        <option key={s} value={s}>
+                          {t(repoKbLabel(s))}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {differences.data
+                    ?.filter(
+                      (d) =>
+                        (!differenceModule || d.module === differenceModule) &&
+                        (!differenceStatus || d.status === differenceStatus),
+                    )
+                    .map((d) => (
+                      <article
+                        key={d.id}
+                        className="space-y-2 rounded-lg border p-4"
                       >
-                        {['open', 'confirmed', 'dismissed'].map((s) => (
-                          <option key={s} value={s}>
-                            {t(repoKbLabel(s))}
-                          </option>
-                        ))}
-                      </select>
-                      <Input
-                        aria-label={t('repoKb.ruleNote')}
-                        placeholder={t('repoKb.ruleNote')}
-                        defaultValue={d.note || ''}
-                        onBlur={(e) => {
-                          if (e.target.value !== (d.note || ''))
+                        <h3 className="font-medium">
+                          {d.module} · {d.program} · {d.kind}
+                        </h3>
+                        <RepoMarkdown kb={kb}>
+                          {d.summary +
+                            '\n\n' +
+                            [d.spec_cite, d.code_cite]
+                              .filter(Boolean)
+                              .join(' ')}
+                        </RepoMarkdown>
+                        <select
+                          aria-label={`${t('repoKb.state')} ${d.program}`}
+                          className="rounded border bg-background p-2"
+                          value={d.status}
+                          onChange={(e) =>
                             mutate.mutate(() =>
                               repoKbApi.markDiscrepancy(
                                 kb,
                                 d.id,
-                                d.status,
                                 e.target.value,
+                                d.note || '',
                               ),
                             )
-                        }}
-                      />
-                    </article>
-                  ))}
+                          }
+                        >
+                          {['open', 'confirmed', 'dismissed'].map((s) => (
+                            <option key={s} value={s}>
+                              {t(repoKbLabel(s))}
+                            </option>
+                          ))}
+                        </select>
+                        <Input
+                          aria-label={t('repoKb.ruleNote')}
+                          placeholder={t('repoKb.ruleNote')}
+                          defaultValue={d.note || ''}
+                          onBlur={(e) => {
+                            if (e.target.value !== (d.note || ''))
+                              mutate.mutate(() =>
+                                repoKbApi.markDiscrepancy(
+                                  kb,
+                                  d.id,
+                                  d.status,
+                                  e.target.value,
+                                ),
+                              )
+                          }}
+                        />
+                      </article>
+                    ))}
                 </div>
               )}
               {tab === 'wiki' && (

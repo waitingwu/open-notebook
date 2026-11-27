@@ -3,14 +3,47 @@
 from __future__ import annotations
 
 import asyncio
-from uuid import uuid4
 from typing import Any
+from uuid import uuid4
 
 from surrealdb import RecordID
-from open_notebook.exceptions import ConflictError, InvalidInputError
 
+from open_notebook.exceptions import ConflictError, InvalidInputError
 from open_notebook.repo_kb.native_db import one, query, record
-from open_notebook.repo_kb.native_jobs import execute_job, submit_job
+from open_notebook.repo_kb.native_jobs import (
+    execute_job,
+    recover_expired_jobs,
+    submit_job,
+)
+
+
+async def recover_batch(db: Any, batch_id: RecordID) -> None:
+    """Release a batch whose active worker lost its fenced write lease."""
+    batch = await one(db, batch_id, "repo_kb_batch")
+    interrupted = False
+    items = batch["items"]
+    for item in items:
+        if item["status"] != "running" or not item.get("job_id"):
+            continue
+        await recover_expired_jobs(db, record(item["kb_id"], "repo_kb"))
+        job = await one(db, item["job_id"], "repo_kb_job")
+        if job["status"] == "failed" and job.get("error") == "WorkerInterrupted":
+            item.update(status="failed", error="WorkerInterrupted")
+            interrupted = True
+    if interrupted:
+        for item in items:
+            if item["status"] == "queued":
+                item["status"] = "cancelled"
+        await query(
+            db,
+            "UPDATE $id SET items=$items,cancelled=true;",
+            {"id": batch_id, "items": items},
+        )
+        await query(
+            db,
+            "DELETE repo_kb_lock:compiler WHERE token=$owner;",
+            {"owner": str(batch_id)},
+        )
 
 
 async def submit_batch(
@@ -42,14 +75,14 @@ async def submit_batch(
             """BEGIN TRANSACTION;
         LET $current = SELECT * FROM ONLY repo_kb_lock:compiler;
         IF $current != NONE AND $current.expires > time::now() { THROW 'Compilation batch already active'; };
-        UPSERT repo_kb_lock:compiler CONTENT {kb:$kb,token:$token,job_id:$token,expires:time::now()+24h};
+        UPSERT repo_kb_lock:compiler CONTENT {kb:$kb,token:$batch_lease,job_id:$batch_lease,expires:time::now()+24h};
         CREATE $id SET items=$items;
         COMMIT TRANSACTION;""",
             {
                 "id": batch,
                 "items": expanded,
                 "kb": record(expanded[0]["kb_id"], "repo_kb"),
-                "token": str(batch),
+                "batch_lease": str(batch),
             },
         )
     except RuntimeError as exc:
@@ -68,8 +101,8 @@ async def submit_batch(
         await query(db, "DELETE $id;", {"id": batch})
         await query(
             db,
-            "DELETE repo_kb_lock:compiler WHERE token=$token;",
-            {"token": str(batch)},
+            "DELETE repo_kb_lock:compiler WHERE token=$batch_lease;",
+            {"batch_lease": str(batch)},
         )
         raise
     return {"batch_id": str(batch), "items": expanded}
@@ -81,8 +114,8 @@ async def execute_batch(db: Any, batch_id: RecordID) -> dict[str, int]:
     finally:
         await query(
             db,
-            "DELETE repo_kb_lock:compiler WHERE token=$token;",
-            {"token": str(batch_id)},
+            "DELETE repo_kb_lock:compiler WHERE token=$batch_lease;",
+            {"batch_lease": str(batch_id)},
         )
 
 
@@ -98,8 +131,8 @@ async def _execute_batch(db: Any, batch_id: RecordID) -> dict[str, int]:
         else:
             lease = await query(
                 db,
-                "UPDATE repo_kb_lock:compiler SET expires=time::now()+24h WHERE token=$token RETURN AFTER;",
-                {"token": str(batch_id)},
+                "UPDATE repo_kb_lock:compiler SET expires=time::now()+24h WHERE token=$batch_lease RETURN AFTER;",
+                {"batch_lease": str(batch_id)},
             )
             if not lease:
                 raise ConflictError("Compilation batch lease was lost")
@@ -117,6 +150,9 @@ async def _execute_batch(db: Any, batch_id: RecordID) -> dict[str, int]:
                     enqueue=False,
                 )
                 item["job_id"] = job["job_id"]
+                await query(
+                    db, "UPDATE $id SET items=$items;", {"id": batch_id, "items": items}
+                )
                 await execute_job(db, record(job["job_id"], "repo_kb_job"))
                 outcome = await one(db, job["job_id"], "repo_kb_job")
                 item["status"] = outcome["status"]

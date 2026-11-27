@@ -14,6 +14,7 @@ export interface RepoKB {
   owner_notebook?: string
   stale: boolean
   last_build_at?: string
+  last_build_commit_set?: Record<string, string>
   source_count?: number
   file_count?: number
   open_discrepancies?: number
@@ -100,6 +101,7 @@ export interface CitationResult {
   lines?: { number: number; text: string; highlight: boolean }[]
 }
 export interface SearchHit {
+  highlights?: string[]
   path?: string
   repo?: string
   title?: string
@@ -110,12 +112,15 @@ export interface SearchHit {
 }
 export interface VerificationReport {
   valid: boolean
+  os_evidence_required: boolean
   rules: {
     source_name: string
     pattern: string
     stored_files: number
     stored_chunks: number
     historical_accesses: number
+    wiki_references: number
+    ai_references: number
     policy_self_test: boolean
   }[]
 }
@@ -142,6 +147,7 @@ export interface StaleModule {
   kb_name: string
   module: string
   source_ids: string[]
+  source_names?: Record<string, string>
   reason: string
   estimated_tokens: number
 }

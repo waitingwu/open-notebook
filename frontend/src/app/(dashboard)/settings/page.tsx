@@ -6,6 +6,7 @@ import { useSettings } from '@/lib/hooks/use-settings'
 import { Button } from '@/components/ui/button'
 import { RefreshCw } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import Link from 'next/link'
 
 export default function SettingsPage() {
   const { t } = useTranslation()
@@ -21,6 +22,7 @@ export default function SettingsPage() {
               <Button variant="outline" size="sm" onClick={() => refetch()}>
                 <RefreshCw className="h-4 w-4" />
               </Button>
+              <Button variant="outline" size="sm" asChild><Link href="/settings/repo-kb">{t('repoKb.settings')}</Link></Button>
             </div>
 
             <SettingsForm />

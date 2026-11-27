@@ -56,6 +56,7 @@ async def test_full_sync_masks_prunes_and_preserves_previous_snapshot_on_failure
         assert result["files"] == 2
         current = await db.query("SELECT * FROM ONLY $id;", {"id": source["id"]})
         old_snapshot = current["current_snapshot"]
+        original_commit = result["commit"]
         chunks = await db.query(
             "SELECT * FROM repo_chunk WHERE snapshot = $snapshot;",
             {"snapshot": old_snapshot},
@@ -75,6 +76,21 @@ async def test_full_sync_masks_prunes_and_preserves_previous_snapshot_on_failure
         assert result["modified"] == 1
         assert result["added"] == 0
         assert result["deleted"] == 0
+        stored = await db.query(
+            "SELECT path,last_commit,last_date FROM repo_file WHERE source=$source AND snapshot=$snapshot;",
+            {
+                "source": source["id"],
+                "snapshot": (
+                    await db.query("SELECT * FROM ONLY $id;", {"id": source["id"]})
+                )["current_snapshot"],
+            },
+        )
+        assert any(
+            f["path"] != "public.txt"
+            and f["last_commit"] == original_commit
+            and f["last_date"]
+            for f in stored
+        )
         current = await db.query("SELECT * FROM ONLY $id;", {"id": source["id"]})
         assert current["current_snapshot"] != old_snapshot
         old_snapshot = current["current_snapshot"]

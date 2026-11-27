@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict
 from typing import Any
 
 from surrealdb import RecordID
 
-from open_notebook.exceptions import ConflictError, InvalidInputError
+from open_notebook.exceptions import ConfigurationError, ConflictError
 from open_notebook.repo_kb.cite import CITE_RE
 from open_notebook.repo_kb.native_db import one, query, transaction
 from open_notebook.repo_kb.native_lock import acquire, release
@@ -16,7 +17,7 @@ from open_notebook.repo_kb.protected_rules import ProtectedRule, is_protected
 
 def parse_rules(values: list[dict[str, Any]]) -> list[ProtectedRule]:
     if len(values) > 100:
-        raise InvalidInputError("At most 100 protected rules are allowed")
+        raise ConfigurationError("At most 100 protected rules are allowed")
     try:
         rules = [ProtectedRule(**value) for value in values]
         if any(len(rule.pattern) > 512 for rule in rules):
@@ -25,7 +26,7 @@ def parse_rules(values: list[dict[str, Any]]) -> list[ProtectedRule]:
             raise ValueError("Duplicate protected rules")
         return rules
     except (ValueError, TypeError) as exc:
-        raise InvalidInputError(str(exc)) from exc
+        raise ConfigurationError(str(exc)) from exc
 
 
 def _references(
@@ -71,10 +72,12 @@ async def update_protected(
         source = await one(db, source_id, "repo_source")
         old = parse_rules(source.get("protected", []))
         active = {(r.kind, r.pattern.casefold()) for r in rules if r.enabled}
+        remaining = {(r.kind, r.pattern.casefold()) for r in rules}
         removed = [
             r.pattern
             for r in old
-            if r.enabled and (r.kind, r.pattern.casefold()) not in active
+            if (r.enabled and (r.kind, r.pattern.casefold()) not in active)
+            or (r.kind, r.pattern.casefold()) not in remaining
         ]
         if removed and (not reason.strip() or not set(removed).issubset(confirmations)):
             raise ConflictError(
@@ -83,7 +86,7 @@ async def update_protected(
         files = (
             await query(
                 db,
-                "SELECT id, path FROM repo_file WHERE source=$source;",
+                "SELECT id, path,snapshot,category FROM repo_file WHERE source=$source;",
                 {"source": source_id},
             )
             or []
@@ -91,6 +94,13 @@ async def update_protected(
         denied = [
             r["id"] for r in files if is_protected(r["path"], is_dir=False, rules=rules)
         ]
+        current = [
+            f
+            for f in files
+            if f.get("snapshot") == source.get("current_snapshot")
+            and f["id"] not in denied
+        ]
+        categories = dict(Counter(f["category"] for f in current))
         pages = (
             await query(
                 db, "SELECT * FROM repo_wiki_page WHERE kb=$kb;", {"kb": source["kb"]}
@@ -153,7 +163,7 @@ async def update_protected(
             DELETE repo_wiki_section WHERE $pages CONTAINS page;
             DELETE $revisions;
             DELETE $notes;
-            UPDATE $source SET protected=$rules, needs_full=true;
+            UPDATE $source SET protected=$rules, needs_full=true,file_count=$current_count,by_category=$categories;
             CREATE repo_exclusion_audit CONTENT $audit;
         """,
             {
@@ -161,6 +171,8 @@ async def update_protected(
                 "source": source_id,
                 "rules": data,
                 "files": denied,
+                "current_count": len(current),
+                "categories": categories,
                 "pages": affected,
                 "revisions": bad_revisions,
                 "notes": bad_notes,

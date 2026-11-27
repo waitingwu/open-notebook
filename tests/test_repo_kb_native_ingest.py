@@ -35,3 +35,18 @@ def test_masking_happens_before_chunks_are_returned(tmp_path: object) -> None:
     assert "192.168.100.8" not in result.chunks[0].body
     assert "<SECRET>" in result.chunks[0].body
     assert result.masks["secret"] == 1
+
+
+def test_converter_nulls_are_normalized_without_changing_lines(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "open_notebook.repo_kb.native_ingest.extract",
+        lambda *_: ("first\x00line\nsecond", "textutil"),
+    )
+    git = Mock()
+    git.read_blob.return_value = b"converted fixture"
+    result = prepare_entry(
+        git, TreeEntry("fixture.doc", "blob"), "doc", [], str(tmp_path)
+    )
+    assert result.lines == 2
+    assert result.chunks[0].body == "first\ufffdline\nsecond"
+    assert result.chunks[0].end_line == 2

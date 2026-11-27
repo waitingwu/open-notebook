@@ -15,6 +15,20 @@ async def verify_exclusions(db: Any, kb: RecordID) -> dict[str, Any]:
         await query(db, "SELECT * FROM repo_source WHERE kb=$kb;", {"kb": kb}) or []
     )
     reports = []
+    pages = (
+        await query(
+            db, "SELECT citations FROM repo_wiki_page WHERE kb=$kb;", {"kb": kb}
+        )
+        or []
+    )
+    events = (
+        await query(
+            db,
+            "SELECT detail FROM repo_kb_event WHERE kb=$kb AND (action='retrieve' OR action='ai_input');",
+            {"kb": kb},
+        )
+        or []
+    )
     for source in sources:
         files = (
             await query(
@@ -65,6 +79,18 @@ async def verify_exclusions(db: Any, kb: RecordID) -> dict[str, Any]:
                     "stored_files": matched(files),
                     "stored_chunks": matched(chunks),
                     "historical_accesses": matched(logs),
+                    "wiki_references": sum(
+                        c.get("repo") == source["name"]
+                        and is_protected(c.get("path", ""), is_dir=False, rules=[rule])
+                        for p in pages
+                        for c in p.get("citations", [])
+                    ),
+                    "ai_references": sum(
+                        str(p.get("source")) in {str(source["id"]), source["name"]}
+                        and is_protected(p.get("path", ""), is_dir=False, rules=[rule])
+                        for e in events
+                        for p in e.get("detail", {}).get("paths", [])
+                    ),
                     "policy_self_test": is_protected(
                         sample, is_dir=False, rules=[rule]
                     ),
@@ -74,7 +100,13 @@ async def verify_exclusions(db: Any, kb: RecordID) -> dict[str, Any]:
     return {
         "rules": reports,
         "valid": all(
-            r["stored_files"] == 0 and r["stored_chunks"] == 0 and r["policy_self_test"]
+            r["stored_files"] == 0
+            and r["stored_chunks"] == 0
+            and r["historical_accesses"] == 0
+            and r["wiki_references"] == 0
+            and r["ai_references"] == 0
+            and r["policy_self_test"]
+            and r["synced"]
             for r in reports
         ),
         "os_evidence_required": True,

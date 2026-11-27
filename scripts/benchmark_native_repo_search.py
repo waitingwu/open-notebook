@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 from surrealdb import AsyncSurreal, RecordID
 
@@ -47,6 +48,7 @@ async def benchmark(
         )
         return int(value.strip()) / 1024
 
+    db: Any
     async with AsyncSurreal(f"ws://{endpoint}/rpc") as db:
         await db.signin({"username": "bench", "password": password})
         await db.use("bench", "bench")
@@ -63,7 +65,7 @@ async def benchmark(
         cursor = conn.execute(
             "SELECT body FROM fts WHERE lower('/' || path || '/') NOT LIKE '%/usr/%'"
         )
-        documents = []
+        documents: list[tuple[RecordID, str]] = []
         peak = rss_mib()
         load_started = time.monotonic()
         while batch := cursor.fetchmany(250):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import time
@@ -46,6 +47,7 @@ def parse_selection(text: str, allowed: set[str]) -> list[str]:
 
 def entity_pages(question: str, pages: list[dict[str, Any]]) -> list[str]:
     tokens = set(re.findall(r"[A-Z][A-Z0-9_]{1,}", question.upper()))
+    tokens.update(re.findall(r"\bAV([A-Z0-9]{2})_[A-Z0-9]{4}\b", question.upper()))
     exact = []
     for page in pages:
         leaf = page["slug"].rsplit("/", 1)[-1].upper()
@@ -68,6 +70,7 @@ async def retrieve(
     model_id: str | None = None,
     model: Any = None,
     budget: int = 24000,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     kb = await visible_kb(db, kb_id)
@@ -79,7 +82,14 @@ async def retrieve(
         )
         or []
     )
-    pages = [p for p in pages if await page_readable(db, kb_id, p)]
+    sources = {
+        str(s["id"]): s
+        for s in await query(
+            db, "SELECT * FROM repo_source WHERE kb=$kb;", {"kb": kb_id}
+        )
+        or []
+    }
+    pages = [p for p in pages if await page_readable(db, kb_id, p, sources)]
     directory = [
         p
         for p in pages
@@ -155,13 +165,20 @@ async def retrieve(
         target_kind="source",
         limit=8,
     )
-    blocks.extend(h["ref"] + "\n" + h["body"] for h in source_hits if h.get("ref"))
+    blocks.extend(
+        h["ref"]
+        + f"\nGit 最後異動：{h.get('file_commit')}；日期：{h.get('file_date')}\n"
+        + h["body"]
+        for h in source_hits
+        if h.get("ref")
+    )
     resolved_paths = set()
     for ref in list(dict.fromkeys(referenced))[:24]:
         evidence = await resolve(db, kb_id, ref, context=3)
         if evidence["valid"]:
             blocks.append(
                 ref
+                + f"\nGit 最後異動日期：{evidence.get('file_date')}\n"
                 + "\n"
                 + "\n".join(
                     f"L{line['number']}: {line['text']}" for line in evidence["lines"]
@@ -177,6 +194,9 @@ async def retrieve(
             used += size
     await check_policy_version(db, kb_id, kb.get("policy_version", 0))
     metrics = {
+        "session_id": session_id,
+        "model_id": model_id,
+        "question_sha256": hashlib.sha256(question.encode()).hexdigest(),
         "entities": entities,
         "selected": slugs,
         "bm25": keyword_pages,
@@ -184,6 +204,12 @@ async def retrieve(
         "selection": stats,
         "context_tokens": used,
         "source_paths": len(resolved_paths),
+        "paths": list(
+            {
+                (c["repo"], c["path"]): {"source": c["repo"], "path": c["path"]}
+                for c in citations("\n\n".join(context))
+            }.values()
+        ),
         "seconds": round(time.monotonic() - started, 3),
     }
     await query(
@@ -200,6 +226,7 @@ async def notebook_context(
     question: str,
     model_id: str | None,
     disabled: list[str] | None = None,
+    session_id: str | None = None,
 ) -> str:
     notebook = record(notebook_id, "notebook")
     row = await query(db, "SELECT repo_kbs FROM ONLY $id;", {"id": notebook})
@@ -210,7 +237,12 @@ async def notebook_context(
             continue
         await visible_kb(db, value, notebook)
         result = await retrieve(
-            db, value, question, model_id=model_id, budget=remaining
+            db,
+            value,
+            question,
+            model_id=model_id,
+            budget=remaining,
+            session_id=session_id,
         )
         texts.append(result["context"])
         remaining -= result["metrics"]["context_tokens"]

@@ -21,6 +21,10 @@ class ProtectedRule:
 
     def __post_init__(self) -> None:
         pattern = self.pattern
+        if not pattern.strip() or any(ord(ch) < 32 for ch in pattern):
+            raise ValueError(
+                "Protected patterns cannot be blank or contain control characters"
+            )
         if not pattern or pattern in {"*", "**", "/"}:
             raise ValueError("Protected exclusion must not match the whole source")
         if self.kind not in {"dir_name", "glob"}:

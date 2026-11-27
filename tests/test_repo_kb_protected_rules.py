@@ -39,7 +39,9 @@ def test_direct_descendant_lookup_respects_a_pruned_glob_directory() -> None:
 
 
 def test_native_source_include_exclude_and_protection_are_independent() -> None:
-    rules = NativePathRules(["**/*.txt"], ["*/ignore.txt"], [ProtectedRule("dir_name", "secret")])
+    rules = NativePathRules(
+        ["**/*.txt"], ["*/ignore.txt"], [ProtectedRule("dir_name", "secret")]
+    )
     assert rules.allows_file("docs/readme.txt")
     assert not rules.allows_file("docs/ignore.txt")
     assert not rules.allows_file("docs/readme.pdf")

@@ -41,6 +41,31 @@ async def current_files(db: Any, kb: RecordID) -> list[dict[str, Any]]:
     return files
 
 
+async def chunks_for_files(
+    db: Any, files: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Read only previously authorised files using indexed equality predicates.
+
+    Array-CONTAINS predicates make SurrealDB 2.7 scan every historical chunk.
+    Explicit equality also avoids an embedded-engine record-array IN issue.
+    """
+    result: list[dict[str, Any]] = []
+    for start in range(0, len(files), 100):
+        values = {
+            f"file_{i}": f["id"] for i, f in enumerate(files[start : start + 100])
+        }
+        clause = " OR ".join(f"file=${key}" for key in values)
+        result.extend(
+            await query(
+                db,
+                f"SELECT * FROM repo_chunk WHERE {clause} ORDER BY start_line;",
+                values,
+            )
+            or []
+        )
+    return result
+
+
 async def readable_file(db: Any, kb: RecordID, file: RecordID) -> dict[str, Any]:
     row = await one(db, file, "repo_file")
     source = await one(db, row["source"], "repo_source")

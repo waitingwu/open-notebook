@@ -35,13 +35,14 @@ def main() -> None:
     )
     node = None
     for candidate in node_candidates:
-        major = int(
+        version = (
             subprocess.check_output([str(candidate), "--version"], text=True)
             .strip()
             .lstrip("v")
-            .split(".")[0]
+            .split(".")
         )
-        if major >= 22:
+        major, minor = int(version[0]), int(version[1])
+        if major > 22 or (major == 22 and minor >= 12):
             node = candidate
             break
     if node is None:
@@ -148,7 +149,6 @@ def main() -> None:
         for child in reversed(children):
             if child.poll() is None:
                 child.terminate()
-        for child in reversed(children):
             try:
                 child.wait(timeout=8)
             except subprocess.TimeoutExpired:

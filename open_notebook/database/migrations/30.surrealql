@@ -10,7 +10,6 @@ DEFINE FIELD IF NOT EXISTS last_build_at ON repo_kb TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_build_commit_set ON repo_kb FLEXIBLE TYPE object DEFAULT {};
 DEFINE FIELD IF NOT EXISTS stale ON repo_kb TYPE bool DEFAULT false;
 DEFINE FIELD IF NOT EXISTS policy_version ON repo_kb TYPE int DEFAULT 0;
-DEFINE FIELD IF NOT EXISTS health ON repo_kb FLEXIBLE TYPE object DEFAULT {};
 DEFINE FIELD IF NOT EXISTS search_generation ON repo_kb TYPE option<record<repo_search_generation>>;
 
 DEFINE TABLE IF NOT EXISTS repo_source SCHEMAFULL;
@@ -202,7 +201,6 @@ DEFINE FIELD IF NOT EXISTS created ON repo_search_generation TYPE datetime DEFAU
 DEFINE FIELD IF NOT EXISTS document_count ON repo_search_generation TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS ready ON repo_search_generation TYPE bool DEFAULT false;
 DEFINE FIELD IF NOT EXISTS policy_version ON repo_search_generation TYPE int DEFAULT 0;
-DEFINE FIELD IF NOT EXISTS average_length ON repo_search_generation TYPE float DEFAULT 1.0;
 
 DEFINE TABLE IF NOT EXISTS repo_search_document SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS generation ON repo_search_document TYPE record<repo_search_generation>;

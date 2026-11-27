@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from surrealdb import RecordID
@@ -28,7 +29,10 @@ def citations(text: str) -> list[dict[str, Any]]:
 async def resolve(
     db: Any, kb_id: RecordID, ref: str, *, context: int = 5
 ) -> dict[str, Any]:
-    values = citations(ref if ref.startswith("〔") else f"〔{ref}〕")
+    normalized = ref if ref.startswith("〔") else f"〔{ref}〕"
+    if not CITE_RE.fullmatch(normalized):
+        return {"valid": False, "status": "invalid_format", "ref": ref}
+    values = citations(normalized)
     if len(values) != 1:
         return {"valid": False, "status": "invalid_format", "ref": ref}
     value = values[0]
@@ -83,6 +87,7 @@ async def resolve(
         return {"valid": False, "status": "unknown_file_or_commit", "ref": ref}
     if len({r["last_commit"] for r in matches}) != 1:
         return {"valid": False, "status": "ambiguous_commit", "ref": ref}
+    matches.sort(key=lambda r: r["snapshot"] != source.get("current_snapshot"))
     file = matches[0]
     if not (1 <= value["start"] <= value["end"] <= file["lines"]):
         return {"valid": False, "status": "line_out_of_range", "ref": ref}
@@ -107,12 +112,25 @@ async def resolve(
     latest = await one(db, source["id"], "repo_source")
     if not latest["enabled"] or not source_rules(latest).allows_file(path):
         return {"valid": False, "status": "denied_path", "ref": ref}
+    current = (
+        await query(
+            db,
+            "SELECT blob,last_commit FROM repo_file WHERE source=$source AND snapshot=$snapshot AND path=$path;",
+            {
+                "source": source["id"],
+                "snapshot": latest.get("current_snapshot"),
+                "path": path,
+            },
+        )
+        or []
+    )
     return {
         "valid": True,
         "status": "ok",
         "ref": value["ref"],
         "file_commit": file["last_commit"],
-        "stale": file["snapshot"] != latest.get("current_snapshot"),
+        "stale": not current or current[0]["blob"] != file["blob"],
+        "file_date": file.get("last_date"),
         "lines": [
             {
                 "number": n,
@@ -125,7 +143,7 @@ async def resolve(
 
 
 async def validate(db: Any, kb: RecordID, text: str) -> dict[str, Any]:
-    refs = list(dict.fromkeys(c["ref"] for c in citations(text)))
+    refs = list(dict.fromkeys(re.findall(r"〔[^〔〕\n]+〕", text)))
     results = [await resolve(db, kb, ref, context=0) for ref in refs]
     return {
         "total": len(refs),

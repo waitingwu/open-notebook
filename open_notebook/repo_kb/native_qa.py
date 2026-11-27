@@ -20,7 +20,7 @@ async def save_answer(
     db: Any, kb: RecordID, session_id: str, message_id: str, title: str
 ) -> dict[str, Any]:
     from open_notebook.graphs.chat import graph
-    from open_notebook.repo_kb.native_wiki import build_wiki
+    from open_notebook.repo_kb.native_wiki import rebuild_search, refresh_directory
 
     session = record(session_id, "chat_session")
     await one(db, session, "chat_session")
@@ -78,7 +78,8 @@ async def save_answer(
                 s["name"]: s["last_commit"] for s in sources if s.get("last_commit")
             },
         )
-        await build_wiki(db, kb, lock)
+        await refresh_directory(db, kb, lock)
+        await rebuild_search(db, kb, lock)
         return result
     finally:
         await release(db.query_raw, lock)

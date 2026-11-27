@@ -38,6 +38,7 @@ const labels: Record<string, string> = {
   cancelled: 'repoKb.cancelled',
   orphanPages: 'repoKb.orphanPages',
   invalidCitations: 'repoKb.invalidCitations',
+  staleCitations: 'repoKb.staleCitations',
   stalePages: 'repoKb.stalePages',
   uncoveredModules: 'repoKb.uncoveredModules',
   open: 'repoKb.open',

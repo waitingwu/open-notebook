@@ -8,7 +8,11 @@ from typing import Any, Awaitable, Callable
 
 from surrealdb import RecordID
 
-from open_notebook.repo_kb.native_access import current_files, reconstruct_text
+from open_notebook.repo_kb.native_access import (
+    chunks_for_files,
+    current_files,
+    reconstruct_text,
+)
 from open_notebook.repo_kb.native_db import one, query, transaction
 from open_notebook.repo_kb.native_lock import WriteLock
 from open_notebook.repo_kb.native_pages import save_page
@@ -25,14 +29,7 @@ async def rebuild_search(db: Any, kb: RecordID, lock: WriteLock) -> dict[str, An
     files = await current_files(db, kb)
     documents: list[tuple[RecordID, str]] = []
     for start in range(0, len(files), 250):
-        rows = (
-            await query(
-                db,
-                "SELECT id,body FROM repo_chunk WHERE $files CONTAINS file;",
-                {"files": [f["id"] for f in files[start : start + 250]]},
-            )
-            or []
-        )
+        rows = await chunks_for_files(db, files[start : start + 250])
         documents.extend((row["id"], row["body"]) for row in rows)
     rows = (
         await query(
@@ -64,6 +61,57 @@ async def rebuild_search(db: Any, kb: RecordID, lock: WriteLock) -> dict[str, An
     return {"documents": len(documents), "generation": str(generation)}
 
 
+async def refresh_directory(db: Any, kb: RecordID, lock: WriteLock) -> None:
+    knowledge_base = await one(db, kb, "repo_kb")
+    sources = (
+        await query(
+            db, "SELECT * FROM repo_source WHERE kb=$kb AND enabled=true;", {"kb": kb}
+        )
+        or []
+    )
+    dependencies = [{"source": str(source["id"])} for source in sources]
+    commits = {
+        source["name"]: source["last_commit"]
+        for source in sources
+        if source.get("last_commit")
+    }
+    entries = (
+        await query(
+            db,
+            "SELECT slug,title,summary,kind,stale FROM repo_wiki_page WHERE kb=$kb;",
+            {"kb": kb},
+        )
+        or []
+    )
+    directory = [f"# {knowledge_base['name']}", "", "## 知識目錄"]
+    for page in sorted(entries, key=lambda r: r["slug"]):
+        if (
+            page["kind"] != "table"
+            and page["slug"] != "index"
+            and (page.get("summary") or not page["stale"])
+        ):
+            directory.append(
+                f"- [{page['title']}]({page['slug']}.md)：{page['summary']}"
+                + ("（來源已變更，待重新編譯）" if page["stale"] else "")
+            )
+    directory += ["", "資料表依表名精確對照或到資料表索引查找。"]
+    await save_page(
+        db,
+        kb,
+        Page(
+            "index",
+            "index",
+            knowledge_base["name"],
+            f"{len(entries)} 頁的分層知識庫目錄。",
+            "\n".join(directory),
+        ),
+        lock,
+        dependencies=dependencies,
+        source_commits=commits,
+        check_citations=False,
+    )
+
+
 async def build_wiki(
     db: Any, kb: RecordID, lock: WriteLock, progress: Progress | None = None
 ) -> dict[str, Any]:
@@ -72,14 +120,7 @@ async def build_wiki(
     texts: dict[str, str] = {}
     for start in range(0, len(files), 250):
         batch = files[start : start + 250]
-        chunks = (
-            await query(
-                db,
-                "SELECT * FROM repo_chunk WHERE $files CONTAINS file ORDER BY start_line;",
-                {"files": [f["id"] for f in batch]},
-            )
-            or []
-        )
+        chunks = await chunks_for_files(db, batch)
         grouped: dict[str, list[dict[str, Any]]] = {}
         for chunk in chunks:
             grouped.setdefault(str(chunk["file"]), []).append(chunk)
@@ -135,41 +176,7 @@ async def build_wiki(
         {"ids": disappeared},
         lock,
     )
-    entries = (
-        await query(
-            db,
-            "SELECT slug,title,summary,kind,stale FROM repo_wiki_page WHERE kb=$kb;",
-            {"kb": kb},
-        )
-        or []
-    )
-    directory = [f"# {knowledge_base['name']}", "", "## 知識目錄"]
-    for page in sorted(entries, key=lambda r: r["slug"]):
-        if (
-            page["kind"] != "table"
-            and page["slug"] != "index"
-            and (page.get("summary") or not page["stale"])
-        ):
-            directory.append(
-                f"- [{page['title']}]({page['slug']}.md)：{page['summary']}"
-                + ("（來源已變更，待重新編譯）" if page["stale"] else "")
-            )
-    directory += ["", "資料表依表名精確對照或到資料表索引查找。"]
-    await save_page(
-        db,
-        kb,
-        Page(
-            "index",
-            "index",
-            knowledge_base["name"],
-            f"{len(pages)} 頁的分層知識庫目錄。",
-            "\n".join(directory),
-        ),
-        lock,
-        dependencies=dependencies,
-        source_commits=commits,
-        check_citations=False,
-    )
+    await refresh_directory(db, kb, lock)
     # Preserve reviewer decisions by a stable discrepancy fingerprint.
     active_keys = []
     for d in differences:
@@ -219,7 +226,7 @@ async def build_wiki(
     report = await health(db, kb, lock)
     return {
         "pages": len(pages) + 1,
-        "discrepancies": len(differences),
+        "discrepancies": len(set(active_keys)),
         "index": index,
         "health": report,
     }

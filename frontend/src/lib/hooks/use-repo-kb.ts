@@ -4,6 +4,7 @@ import { QUERY_KEYS } from '@/lib/api/query-client'
 import { repoKbApi } from '@/lib/api/repo-kb'
 import { useTranslation } from './use-translation'
 import axios from 'axios'
+import { useEffect } from 'react'
 
 export function useRepoKBs() {
   return useQuery({
@@ -22,13 +23,22 @@ export function useRepoSources(kb: string) {
   })
 }
 export function useRepoJobs(kb: string) {
-  return useQuery({
+  const client = useQueryClient()
+  const jobs = useQuery({
     queryKey: [...QUERY_KEYS.repoKb, kb, 'jobs'],
     queryFn: () => repoKbApi.jobs(kb),
     enabled: !!kb,
     retry: false,
     refetchInterval: 2000,
   })
+  const status = jobs.data?.[0]?.status
+  useEffect(() => {
+    if (status && ['completed', 'failed', 'cancelled'].includes(status)) {
+      client.invalidateQueries({ queryKey: [...QUERY_KEYS.repoKb, 'list'] })
+      client.invalidateQueries({ queryKey: [...QUERY_KEYS.repoKb, kb] })
+    }
+  }, [status, kb, client])
+  return jobs
 }
 export function useRepoSettings() {
   return useQuery({

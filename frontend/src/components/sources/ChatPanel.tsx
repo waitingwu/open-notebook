@@ -127,7 +127,7 @@ export function ChatPanel({
                 <Clock className="h-4 w-4" />
                 <span className="text-xs">{t('chat.sessions')}</span>
               </Button>
-              <DialogContent className="sm:max-w-[420px] p-0 overflow-hidden">
+              <DialogContent className="flex h-[min(80vh,640px)] flex-col overflow-hidden p-0 sm:max-w-[420px]">
                 <DialogTitle className="sr-only">{t('chat.sessionsTitle')}</DialogTitle>
                 <SessionManager
                   sessions={sessions}

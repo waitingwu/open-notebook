@@ -10,7 +10,11 @@ from surrealdb import RecordID
 
 from open_notebook.exceptions import InvalidInputError, NotFoundError
 from open_notebook.repo_kb.mask import mask_text
-from open_notebook.repo_kb.native_access import check_policy_version, current_files
+from open_notebook.repo_kb.native_access import (
+    check_policy_version,
+    current_files,
+    source_rules,
+)
 from open_notebook.repo_kb.native_cite import citations, validate
 from open_notebook.repo_kb.native_db import query, transaction, visible_kb
 from open_notebook.repo_kb.native_lock import WriteLock
@@ -50,7 +54,12 @@ async def tree(db: Any, kb: RecordID) -> dict[str, Any]:
         )
         or []
     )
-    rows = [row for row in rows if await page_readable(db, kb, row)]
+    sources = {
+        str(s["id"]): s
+        for s in await query(db, "SELECT * FROM repo_source WHERE kb=$kb;", {"kb": kb})
+        or []
+    }
+    rows = [row for row in rows if await page_readable(db, kb, row, sources)]
     for row in rows:
         row.pop("dependencies", None)
     files = await current_files(db, kb)
@@ -115,9 +124,26 @@ async def restore(
         dependencies=old.get("dependencies", []),
         source_commits=old.get("source_commits", {}),
     )
-    from open_notebook.repo_kb.native_wiki import rebuild_search
+    from open_notebook.repo_kb.native_wiki import rebuild_search, refresh_directory
 
+    sources = (
+        await query(
+            db,
+            "SELECT name,last_commit FROM repo_source WHERE kb=$kb AND enabled=true;",
+            {"kb": kb},
+        )
+        or []
+    )
+    commits = {s["name"]: s["last_commit"] for s in sources if s.get("last_commit")}
+    await transaction(
+        db,
+        "UPDATE $id SET stale=$stale;",
+        {"id": current["id"], "stale": old.get("source_commits", {}) != commits},
+        lock,
+    )
+    await refresh_directory(db, kb, lock)
     await rebuild_search(db, kb, lock)
+    await health(db, kb, lock)
     return result
 
 
@@ -201,7 +227,7 @@ async def health(db: Any, kb: RecordID, lock: WriteLock) -> dict[str, int]:
     stored = (
         await query(
             db,
-            "SELECT source,path,last_commit,lines FROM repo_file WHERE $sources CONTAINS source;",
+            "SELECT source,path,last_commit,lines,blob FROM repo_file WHERE $sources CONTAINS source;",
             {"sources": [s["id"] for s in sources]},
         )
         or []
@@ -225,9 +251,11 @@ async def health(db: Any, kb: RecordID, lock: WriteLock) -> dict[str, int]:
             if f.get("last_commit", "").startswith(ref["commit"])
             and 1 <= ref["start"] <= ref["end"] <= f["lines"]
         ]
-        if not source or not valid or key not in current:
+        if not source or not valid or not source_rules(source).allows_file(ref["path"]):
             invalid += 1
-        elif not current[key].get("last_commit", "").startswith(ref["commit"]):
+        elif key not in current or not any(
+            f["blob"] == current[key]["blob"] for f in valid
+        ):
             stale += 1
     for p in pages:
         for href in re.findall(r"\]\(([^)#]+)", p["body"]):

@@ -101,6 +101,7 @@ def _ip_repl(m: "re.Match[str]") -> str:
 
 
 def mask_text(text: str, is_code: bool = False) -> Tuple[str, Dict[str, int]]:
+    text = text.replace("\x00", "\ufffd")
     counts: Counter = Counter()
     kv = _KV_LITERAL if is_code else _KV_LITERAL + _KV_BARE
     out_lines = []

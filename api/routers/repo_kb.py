@@ -29,7 +29,11 @@ from open_notebook.repo_kb.native_db import (
     transaction,
     visible_kb,
 )
-from open_notebook.repo_kb.native_jobs import cancel_job, submit_job
+from open_notebook.repo_kb.native_jobs import (
+    cancel_job,
+    recover_expired_jobs,
+    submit_job,
+)
 from open_notebook.repo_kb.native_lock import acquire, release
 from open_notebook.repo_kb.native_lookup import search
 from open_notebook.repo_kb.native_mutations import (
@@ -138,11 +142,32 @@ class SettingsUpdate(BaseModel):
     default_protected: list[dict[str, Any]] = Field(default_factory=list)
     allowed_roots: list[str] = Field(default_factory=list)
     selector_timeout: int = Field(default=20, ge=1, le=120)
+    confirm_patterns: list[str] = Field(default_factory=list)
+    reason: str = Field(default="", max_length=2000)
 
 
 @router.get("/kbs")
 async def list_kbs(notebook_id: str | None = None, db: Any = Depends(database)) -> Any:
     rows = await query(db, "SELECT * FROM repo_kb ORDER BY name;") or []
+    sources = (
+        await query(db, "SELECT kb,file_count,last_synced_at FROM repo_source;") or []
+    )
+    differences = (
+        await query(db, "SELECT kb FROM repo_discrepancy WHERE status='open';") or []
+    )
+    for row in rows:
+        members = [s for s in sources if s["kb"] == row["id"]]
+        row.update(
+            {
+                "source_count": len(members),
+                "file_count": sum(s["file_count"] for s in members),
+                "open_discrepancies": sum(d["kb"] == row["id"] for d in differences),
+                "last_synced_at": max(
+                    (s["last_synced_at"] for s in members if s.get("last_synced_at")),
+                    default=None,
+                ),
+            }
+        )
     if notebook_id:
         notebook = record(notebook_id, "notebook")
         rows = [
@@ -181,6 +206,19 @@ class KBPatch(BaseModel):
     scope: Literal["global", "notebook"] | None = None
     owner_notebook: str | None = None
     detach_confirmed: list[str] = Field(default_factory=list)
+
+
+@router.get("/kbs/{kb_id}/mounted-notebooks")
+async def mounted_notebooks(kb_id: str, db: Any = Depends(database)) -> Any:
+    kb = await visible_kb(db, kb_id)
+    return parse_record_ids(
+        await query(
+            db,
+            "SELECT id,name FROM notebook WHERE repo_kbs CONTAINS $kb;",
+            {"kb": kb["id"]},
+        )
+        or []
+    )
 
 
 @router.patch("/kbs/{kb_id}")
@@ -256,6 +294,34 @@ async def save_qa(
     return await save_answer(
         db, record(kb_id, "repo_kb"), body.session_id, body.message_id, body.title
     )
+
+
+@router.delete("/kbs/{kb_id}/chats")
+async def delete_related_chats(
+    kb_id: str, confirmed: bool = False, db: Any = Depends(database)
+) -> Any:
+    if not confirmed:
+        raise ConflictError("Confirm deleting all chats that used this knowledge base")
+    from open_notebook.graphs.chat import memory
+
+    kb = await visible_kb(db, kb_id)
+    sessions = (
+        await query(
+            db,
+            "SELECT id FROM chat_session WHERE repo_kbs CONTAINS $kb;",
+            {"kb": kb["id"]},
+        )
+        or []
+    )
+    for session in sessions:
+        await asyncio.to_thread(memory.delete_thread, str(session["id"]))
+    ids = [s["id"] for s in sessions]
+    await query(
+        db,
+        "DELETE refers_to WHERE $sessions CONTAINS in; DELETE $sessions;",
+        {"sessions": ids},
+    )
+    return {"deleted": len(ids)}
 
 
 @router.get("/kbs/{kb_id}/sources")
@@ -413,6 +479,21 @@ async def read_settings(db: Any = Depends(database)) -> Any:
 @router.put("/settings/repo-kb")
 async def save_settings(body: SettingsUpdate, db: Any = Depends(database)) -> Any:
     rules = parse_rules(body.default_protected)
+    previous = await settings(db)
+    old = parse_rules(previous["default_protected"])
+    remaining = {(r.kind, r.pattern.casefold()): r for r in rules}
+    removed = [
+        r.pattern
+        for r in old
+        if (r.kind, r.pattern.casefold()) not in remaining
+        or (r.enabled and not remaining[(r.kind, r.pattern.casefold())].enabled)
+    ]
+    if removed and (
+        not body.reason.strip() or not set(removed).issubset(body.confirm_patterns)
+    ):
+        raise ConflictError(
+            "Confirm each removed default protection and provide a reason"
+        )
     roots = []
     for value in body.allowed_roots:
         path = Path(value).expanduser().resolve(strict=True)
@@ -420,12 +501,22 @@ async def save_settings(body: SettingsUpdate, db: Any = Depends(database)) -> An
             raise ConfigurationError("Allowed roots must be directories")
         roots.append(str(path))
     data = {
-        **body.model_dump(),
+        **body.model_dump(exclude={"confirm_patterns", "reason"}),
         "default_protected": [asdict(r) for r in rules],
         "allowed_roots": roots,
     }
     await query(
-        db, "UPSERT open_notebook:repo_kb_settings MERGE $data;", {"data": data}
+        db,
+        "BEGIN TRANSACTION; UPSERT open_notebook:repo_kb_settings MERGE $data; CREATE repo_exclusion_audit CONTENT $audit; COMMIT TRANSACTION;",
+        {
+            "data": data,
+            "audit": {
+                "action": "edit",
+                "before": {"rules": previous["default_protected"]},
+                "after": {"rules": data["default_protected"]},
+                "reason": body.reason or None,
+            },
+        },
     )
     return data
 
@@ -466,6 +557,7 @@ async def browse_folders(path: str | None = None, db: Any = Depends(database)) -
 @router.get("/kbs/{kb_id}/jobs")
 async def jobs(kb_id: str, db: Any = Depends(database)) -> Any:
     kb = await visible_kb(db, kb_id)
+    await recover_expired_jobs(db, kb["id"])
     rows = (
         await query(
             db,
@@ -566,6 +658,9 @@ async def compile_batch(body: CompileBatchRequest, db: Any = Depends(database)) 
 
 @router.get("/rules/batches/{batch_id}")
 async def get_batch(batch_id: str, db: Any = Depends(database)) -> Any:
+    from open_notebook.repo_kb.native_batches import recover_batch
+
+    await recover_batch(db, record(batch_id, "repo_kb_batch"))
     row = await one(db, batch_id, "repo_kb_batch")
     row["counts"] = {
         state: sum(i["status"] == state for i in row["items"])

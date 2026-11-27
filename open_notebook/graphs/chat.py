@@ -36,7 +36,10 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
             from open_notebook.repo_kb.retrieve import ANSWER_SYSTEM
 
             payload.insert(
-                1, SystemMessage(content=ANSWER_SYSTEM + "\n" + state["repo_context"])
+                1,
+                SystemMessage(
+                    content=ANSWER_SYSTEM + "\n" + (state.get("repo_context") or "")
+                ),
             )
         model_id = config.get("configurable", {}).get("model_id") or state.get(
             "model_override"

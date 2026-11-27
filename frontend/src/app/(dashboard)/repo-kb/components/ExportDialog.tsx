@@ -102,6 +102,7 @@ export function ExportDialog({
     queryKey: ['repo-kb', kb, 'export'],
     queryFn: () => repoKbApi.exportConfig(kb),
     retry: false,
+    refetchInterval:2000,
   })
   return (
     <Dialog

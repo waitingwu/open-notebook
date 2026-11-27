@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import math
+from collections import defaultdict
 from typing import Any, Awaitable, Callable, Iterable
 from uuid import uuid4
 
@@ -162,3 +164,41 @@ async def candidate_targets(query: Query, kb: RecordID, text: str) -> list[Recor
     if not isinstance(documents, list):
         raise RuntimeError("Search document lookup failed")
     return [row["target"] for row in documents if row.get("generation") == generation]
+
+
+async def ranked_targets(
+    query: Query, generation: dict[str, Any], terms: list[str], limit: int = 1000
+) -> tuple[list[RecordID], dict[str, int]]:
+    """Fetch each posting once, rank ordinals, then resolve a bounded target set."""
+    current = generation["id"]
+    count = generation["document_count"]
+    all_grams = {gram for term in terms for gram in grams(term)}
+    rows = (
+        await _run(
+            query,
+            "SELECT gram,ids FROM $ids;",
+            {"ids": [posting_id(current, gram) for gram in sorted(all_grams)]},
+        )
+        if all_grams
+        else []
+    )
+    postings = {row["gram"]: row["ids"] for row in rows}
+    scores: dict[int, float] = defaultdict(float)
+    frequencies = {}
+    for term in terms:
+        ordinals = candidates(term, postings, count)
+        frequencies[term] = len(ordinals)
+        weight = math.log(1 + (count - len(ordinals) + 0.5) / (len(ordinals) + 0.5))
+        for ordinal in ordinals:
+            scores[ordinal] += weight
+    selected = sorted(scores, key=lambda ordinal: (-scores[ordinal], ordinal))[:limit]
+    documents = (
+        await _run(
+            query,
+            "SELECT target FROM $ids;",
+            {"ids": [document_id(current, ordinal) for ordinal in selected]},
+        )
+        if selected
+        else []
+    )
+    return [doc["target"] for doc in documents], frequencies

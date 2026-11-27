@@ -133,14 +133,25 @@ async def save_page(
     return {"id": str(target), "slug": value.slug, "revision": version}
 
 
-async def page_readable(db: Any, kb: RecordID, page: dict[str, Any]) -> bool:
+async def page_readable(
+    db: Any,
+    kb: RecordID,
+    page: dict[str, Any],
+    sources: dict[str, dict[str, Any]] | None = None,
+) -> bool:
     # Protection invalidates pages transactionally. Dependencies additionally
     # prevent old revisions from bypassing current source policy.
     from open_notebook.repo_kb.native_access import source_rules
 
     for dep in page.get("dependencies", []):
-        source = await query(
-            db, "SELECT * FROM ONLY $id;", {"id": RecordID.parse(str(dep["source"]))}
+        source = (
+            sources.get(str(dep["source"]))
+            if sources is not None
+            else await query(
+                db,
+                "SELECT * FROM ONLY $id;",
+                {"id": RecordID.parse(str(dep["source"]))},
+            )
         )
         if (
             not isinstance(source, dict)

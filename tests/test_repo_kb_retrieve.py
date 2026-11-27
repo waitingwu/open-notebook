@@ -2,6 +2,19 @@ import json
 
 import pytest
 
+from open_notebook.exceptions import InvalidInputError
+from open_notebook.repo_kb.native_compile import citation_aliases, expand_aliases
+
+
+def test_compiler_source_ids_expand_only_to_verified_input_references():
+    ref = "〔docs:spec.doc#L1-L40@abcdef12〕"
+    context, aliases = citation_aliases(ref + "\nL1: 檢查來源")
+    assert "〔S1〕" in context
+    assert expand_aliases("步驟〔S1〕", aliases) == "步驟" + ref
+    with pytest.raises(InvalidInputError):
+        expand_aliases("偽造來源〔S999〕", aliases)
+
+
 from open_notebook.repo_kb.retrieve import entity_pages, parse_selection
 
 

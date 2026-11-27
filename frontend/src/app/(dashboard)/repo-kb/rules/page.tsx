@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { AppShell } from '@/components/layout/AppShell'
@@ -21,6 +22,15 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 import { selectClass } from '../components/RuleEditor'
 
 export default function RuleBatches() {
+  return (
+    <Suspense>
+      <RuleBatchContent />
+    </Suspense>
+  )
+}
+
+function RuleBatchContent() {
+  const params = useSearchParams()
   const { t } = useTranslation()
   const bases = useRepoKBs()
   const stale = useQuery({
@@ -28,7 +38,7 @@ export default function RuleBatches() {
     queryFn: repoKbApi.staleModules,
     retry: false,
   })
-  const [filter, setFilter] = useState('')
+  const [filter, setFilter] = useState(params.get('kb') || '')
   const [source, setSource] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [model, setModel] = useState('')
@@ -65,6 +75,10 @@ export default function RuleBatches() {
   const chosen = (stale.data || []).filter((r) =>
     selected.includes(r.kb_id + '|' + r.module),
   )
+  const sourceNames = Object.assign(
+    {},
+    ...(stale.data || []).map((r) => r.source_names || {}),
+  ) as Record<string, string>
   const estimate = chosen.reduce((total, r) => total + r.estimated_tokens, 0)
   return (
     <AppShell>
@@ -94,7 +108,7 @@ export default function RuleBatches() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           >
-            <option value="">{t('common.all')}</option>
+            <option value="">{t('repoKb.all')}</option>
             {bases.data?.map((kb) => (
               <option key={kb.id} value={kb.id}>
                 {kb.name}
@@ -107,9 +121,11 @@ export default function RuleBatches() {
             value={source}
             onChange={(e) => setSource(e.target.value)}
           >
-            <option value="">{t('common.all')}</option>
+            <option value="">{t('repoKb.all')}</option>
             {allSources.map((id) => (
-              <option key={id}>{id}</option>
+              <option key={id} value={id}>
+                {sourceNames[id] || id}
+              </option>
             ))}
           </select>
           <Button

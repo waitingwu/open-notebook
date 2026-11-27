@@ -21,6 +21,7 @@ from open_notebook.repo_kb.native_paths import validate_source_path
 from open_notebook.repo_kb.native_store import (
     activate_snapshot,
     create_snapshot,
+    file_id,
     replace_file,
 )
 from open_notebook.repo_kb.protected_rules import NativePathRules, ProtectedRule
@@ -95,6 +96,7 @@ async def _sync_locked(
         source.get("include", []), source.get("exclude", []), protected
     )
     git = GitRepo(str(path), protected)
+    snapshot = None
     try:
         commit = await asyncio.to_thread(git.head)
         snapshot = await create_snapshot(db.query_raw, source_id, commit, lock)
@@ -171,6 +173,25 @@ async def _sync_locked(
                 masks.update(prepared.masks)
                 if progress is not None:
                     await progress(index, len(entries))
+        history = await asyncio.to_thread(git.last_commits, commit)
+        changes = [
+            {
+                "target": file_id(source_id, snapshot, entry.path),
+                "sha": history.get(entry.path, (commit, ""))[0],
+                "date": history.get(entry.path, (commit, ""))[1] or None,
+            }
+            for entry in entries
+        ]
+        for start in range(0, len(changes), 250):
+            await transaction(
+                db,
+                """FOR $change IN $changes {
+                LET $target=$change.target;
+                UPDATE $target SET last_commit=$change.sha,last_date=$change.date;
+            };""",
+                {"changes": changes[start : start + 250]},
+                lock,
+            )
         await activate_snapshot(
             db.query_raw, source_id, snapshot, source["kb"], commit, len(entries), lock
         )
@@ -184,5 +205,22 @@ async def _sync_locked(
             "by_category": dict(categories),
             "masks": dict(masks),
         }
+    except BaseException:
+        if snapshot is not None:
+            try:
+                await db.query_raw(
+                    """BEGIN TRANSACTION;
+                LET $staging = SELECT * FROM ONLY $snapshot;
+                IF $staging != NONE AND $staging.source=$source AND $staging.ready=false {
+                    DELETE repo_chunk WHERE snapshot=$snapshot;
+                    DELETE repo_file WHERE snapshot=$snapshot;
+                    DELETE $snapshot;
+                };
+                COMMIT TRANSACTION;""",
+                    {"snapshot": snapshot, "source": source_id},
+                )
+            except Exception:
+                pass  # An unavailable DB cannot expose an unpublished snapshot.
+        raise
     finally:
         await asyncio.to_thread(git.close)

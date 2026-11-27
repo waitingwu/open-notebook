@@ -322,6 +322,11 @@ function Workspace({ kb }: { kb: string }) {
           {t('repoKb.verify')}
         </Button>
         <Button asChild variant="ghost">
+          <Link href={`/repo-kb/rules?kb=${encodeURIComponent(kb)}`}>
+            {t('repoKb.rules')}
+          </Link>
+        </Button>
+        <Button asChild variant="ghost">
           <Link href={`/repo-kb/${encodeURIComponent(kb)}`}>
             <BookOpen className="mr-2 size-4" />
             {t('repoKb.browse')}
@@ -415,7 +420,18 @@ function Workspace({ kb }: { kb: string }) {
                   className="p-3 font-mono text-xs"
                   title={source.last_commit}
                 >
-                  {source.last_commit?.slice(0, 10) || '—'}
+                  {source.last_commit ? (
+                    <button
+                      title={t('common.copy')}
+                      onClick={() =>
+                        navigator.clipboard.writeText(source.last_commit!)
+                      }
+                    >
+                      {source.last_commit.slice(0, 10)}
+                    </button>
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td className="p-3 tabular-nums">{source.file_count}</td>
                 <td className="p-3">
@@ -596,6 +612,11 @@ function Workspace({ kb }: { kb: string }) {
             </DialogHeader>
             <div className="max-h-96 space-y-3 overflow-auto">
               <p>{t(report.valid ? 'repoKb.valid' : 'repoKb.invalid')}</p>
+              {report.os_evidence_required && (
+                <p className="text-sm text-muted-foreground">
+                  {t('repoKb.osEvidence')}
+                </p>
+              )}
               {report.rules.map((rule, index) => (
                 <div className="rounded-lg border p-3 text-sm" key={index}>
                   <p className="font-medium">
@@ -611,6 +632,10 @@ function Workspace({ kb }: { kb: string }) {
                     {t(
                       rule.policy_self_test ? 'repoKb.valid' : 'repoKb.invalid',
                     )}
+                  </p>
+                  <p>
+                    {t('repoKb.derivedReferences')}: {rule.wiki_references} /{' '}
+                    {rule.ai_references}
                   </p>
                 </div>
               ))}
@@ -683,7 +708,7 @@ export default function RepoKBPage() {
               value={scopeFilter}
               onChange={(e) => setScopeFilter(e.target.value)}
             >
-              <option value="">{t('common.all')}</option>
+              <option value="">{t('repoKb.all')}</option>
               <option value="global">{t('repoKb.global')}</option>
               <option value="notebook">{t('repoKb.private')}</option>
             </select>

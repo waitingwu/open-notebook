@@ -29,6 +29,26 @@ async def allowed_roots(db: Any) -> list[str]:
 
 
 def data_roots() -> list[str]:
-    return [
-        str(Path(value).resolve()) for value in ("./data", "./surreal_data", "/mydata")
+    from open_notebook.config import (
+        DATA_FOLDER,
+        LANGGRAPH_CHECKPOINT_FILE,
+        UPLOADS_FOLDER,
+    )
+
+    roots = [
+        DATA_FOLDER,
+        UPLOADS_FOLDER,
+        str(Path(LANGGRAPH_CHECKPOINT_FILE).parent),
+        "./data",
+        "./surreal_data",
+        "./surreal-data",
+        "/mydata",
     ]
+    roots.extend(
+        value
+        for value in os.environ.get("REPO_KB_DATA_ROOTS", "").split(os.pathsep)
+        if value
+    )
+    return list(
+        dict.fromkeys(str(Path(value).expanduser().resolve()) for value in roots)
+    )
