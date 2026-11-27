@@ -4,6 +4,10 @@
 本報告記錄工程驗證，不代替使用者的流程判讀與正式驗收。
 截圖與完整 JSON 輸出另放在 issue 附件的證據包；未將公司來源內容加入程式庫。
 
+2026-11-27 使用者已確認 D1 採方案 (b)：以「資料庫零筆存取紀錄＋保護排除規則測試」
+作為通過依據，不要求 sudo 追蹤。未提供作業系統層的檔案存取追蹤仍列為已知限制，
+此決定不表示已取得 OS 層證據。
+
 ## 可試用的環境
 
 - 網址：`http://localhost:41000/repo-kb`。
@@ -31,7 +35,7 @@
 | C2 選頁 | 十題 × 兩輪 × 兩種 CLI，工程標註的必要頁總召回 100%，純 BM25 為 63.64% | `retrieval-benchmark.json`；標註尚未由使用者確認，且首次量測時流程頁尚未建成，因此這是工程基準，**不是正式 C2 過關聲明** |
 | C2 問答回寫 | 從網頁把 Q10 回答存成 QA，改問「移往冷儲存日期的畫面調整」，模型選到該 QA 頁 | `c2-save-qa-confirmation.png`、`c2-qa-paraphrase.json`；選中 `qa/9a8267c92b3eaaa04098`，過程經正常對話 API |
 | C3 | A0 規則兩次真實編譯後，從 UI 比較並回復 v1，產生 v3；本文、來源 commit 與模型資訊均與 v1 相符。人工補充重建保留、ZIP、Git commit、來源路徑匯出 422 也已驗證 | `c3-rule-version-comparison.png`、`c3-final.json`、`c3-manual-note.png`、`c3-git-export.png`、`trial-wiki.zip`；合成 `usr` 清除會連同依賴該來源的人工補充清除，這是保護清除，不是重建覆寫，之後重新加的補充經重建仍保留 |
-| D1 | 真實 `usr` 的 file、chunk、歷史存取、wiki 引用、AI 引用均 0，規則自測通過 | `d1-protection-report.png`、`acceptance-probes.json`；`sudo -n fs_usage` 因需要密碼無法執行，**OS 層證據待有管理員權限者補齊** |
+| D1 | **依使用者確認的方案 (b) 通過**：真實 `usr` 的 file、chunk、歷史存取、wiki 引用、AI 引用均 0，保護排除規則自測通過 | `d1-protection-report.png`、`acceptance-probes.json`；未提供作業系統層的檔案存取追蹤，列為已知限制，不再作為本次驗收阻礙 |
 | D2 | 後端 1,329 tests；前端 45 files／511 tests 通過；Ruff、mypy（258 files）、TypeScript、ESLint 檢查結果附包 | 前端測試用 `--maxWorkers=2`；ESLint 0 errors／51 既有 warnings。新增回歸包含 fencing、中斷恢復、保護清除、scope、mask、增量 commit、嚴格引用、搜尋、422 匯出與 409 併發；載入歷史對話也重新檢查目前引用權限 |
 | D3 | 本報告、截圖、完整逐題資料與 PR 草稿以繁體中文交付 | 來源內容只在經授權的資料庫與 issue 證據附件，未提交到程式庫 |
 
@@ -99,5 +103,5 @@ SurrealDB 原生全文索引沒有通過 Day 1 測試，因此採規格預留備
 3. Claude CLI 的嚴格選頁輸出不穩定，會走備援；未改用自由文字猜頁，也未因出現表名就跳過選頁。
 4. 未被 wiki 涵蓋且缺少關鍵字的長尾問題仍可能找不到。引文可回查不保證回答解讀正確。
 5. Git 匯出只新增指定分支 commit、不 push、不修改工作目錄。保護清除不會重寫既有 Git 匯出歷史。
-6. OS 層存取追蹤尚缺管理員權限；不宣稱 D1 全項完成。
-7. `origin` 指向 `lfnovo/open-notebook`，未推送。需要使用者自己的 fork URL 才能建立 PR；已準備本機 commit、PR 草稿與可攜修補檔，沒有推到原作者 repo。
+6. 未提供作業系統層的檔案存取追蹤。使用者已明確接受方案 (b)，D1 依資料庫零筆紀錄與保護排除規則測試通過；不能將此結果解讀為 OS 層存取證明。
+7. 使用者已提供 fork `waitingwu/open-notebook`，交付分支為 `feat/repo-kb-native`，PR 以 fork 的 `main` 為目標。`origin` 保留為原作者 repo；推送僅使用新增的 `fork` remote。原始驗證版本為 `ae7d563`，本次只追加驗收決策文件更新；PR 連結回填於 issue。
