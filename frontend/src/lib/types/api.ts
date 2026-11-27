@@ -179,6 +179,7 @@ export interface SourceChatMessage {
   type: 'human' | 'ai'
   content: string
   timestamp?: string
+  repo_citations?: Record<string, boolean>
 }
 
 export interface SourceChatContextIndicator {
@@ -226,6 +227,7 @@ export interface NotebookChatMessage {
   type: 'human' | 'ai'
   content: string
   timestamp?: string
+  repo_citations?: Record<string, boolean>
 }
 
 export interface NotebookChatSessionWithMessages extends NotebookChatSession {
@@ -251,6 +253,7 @@ export interface SendNotebookChatMessageRequest {
     notes: Array<Record<string, unknown>>
   }
   model_override?: string
+  disabled_repo_kbs?: string[]
 }
 
 export interface BuildContextRequest {

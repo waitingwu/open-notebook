@@ -1,9 +1,11 @@
+import { repoKbEn } from '../repo-kb';
 import type { TranslationShape } from '../en-US';
 
 // German locale.
 // Translate values only; do not change keys, placeholders or structure.
 
 export const deDE = {
+  repoKb: repoKbEn,
   common: {
     search: "Suchen...",
     create: "Neu",

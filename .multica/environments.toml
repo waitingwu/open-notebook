@@ -1,0 +1,6 @@
+[environments.repo-kb]
+label = "CaBook Repo KB preview"
+start = ".venv/bin/python scripts/dev_repo_kb.py"
+url = "http://localhost:$MULTICA_PORT/repo-kb"
+ready = "http://localhost:$MULTICA_PORT/repo-kb"
+ttl = "24h"

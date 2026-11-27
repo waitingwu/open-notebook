@@ -1,6 +1,8 @@
+import { repoKbEn } from '../repo-kb';
 import type { TranslationShape } from '../en-US';
 
 export const bnIN = {
+  repoKb: repoKbEn,
   common: {
     search: "অনুসন্ধান...",
     create: "নতুন",

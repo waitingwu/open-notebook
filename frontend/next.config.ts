@@ -10,6 +10,7 @@ const allowedDevOrigins = process.env.NEXT_ALLOWED_DEV_ORIGINS
   : undefined;
 
 const nextConfig: NextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   // Enable standalone output for optimized Docker deployment
   output: "standalone",
 

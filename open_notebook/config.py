@@ -2,7 +2,7 @@ import os
 from typing import MutableMapping
 
 # ROOT DATA FOLDER
-DATA_FOLDER = "./data"
+DATA_FOLDER = os.environ.get("OPEN_NOTEBOOK_DATA_FOLDER", "").strip() or "./data"
 
 # LANGGRAPH CHECKPOINT FILE
 sqlite_folder = f"{DATA_FOLDER}/sqlite-db"

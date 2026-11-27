@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { RepoMounts } from '@/components/common/RepoMounts'
 import { useNotebookChat } from '@/lib/hooks/use-notebook-chat'
 import { useNotes } from '@/lib/hooks/use-notes'
 import { ChatPanel } from '@/components/sources/ChatPanel'
@@ -20,6 +21,7 @@ interface ChatColumnProps {
 
 export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoading }: ChatColumnProps) {
   const { t } = useTranslation()
+  const [disabledRepoKBs, setDisabledRepoKBs] = useState<string[]>([])
 
   // Fetch notes for this notebook
   const { data: notes = [], isLoading: notesLoading } = useNotes(notebookId)
@@ -29,7 +31,8 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
     notebookId,
     sources,
     notes,
-    contextSelections
+    contextSelections,
+    disabledRepoKBs,
   })
 
   // Calculate context stats for indicator
@@ -92,7 +95,7 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
   }
 
   return (
-    <ChatPanel
+    <div className="flex h-full min-h-0 flex-col"><RepoMounts notebook={notebookId} disabled={disabledRepoKBs} onDisable={setDisabledRepoKBs} /><div className="min-h-0 flex-1"><ChatPanel
       title={t('chat.chatWithNotebook')}
       contextType="notebook"
       messages={chat.messages}
@@ -110,6 +113,6 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
       loadingSessions={chat.loadingSessions}
       notebookContextStats={contextStats}
       notebookId={notebookId}
-    />
+    /></div></div>
   )
 }

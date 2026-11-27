@@ -1,6 +1,8 @@
+import { repoKbEn } from '../repo-kb';
 import type { TranslationShape } from '../en-US';
 
 export const jaJP = {
+  repoKb: repoKbEn,
   common: {
     search: "検索...",
     create: "新規",

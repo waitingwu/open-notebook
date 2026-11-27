@@ -1,6 +1,8 @@
+import { repoKbEn } from '../repo-kb';
 import type { TranslationShape } from '../en-US';
 
 export const itIT = {
+  repoKb: repoKbEn,
   common: {
     search: "Cerca...",
     create: "Nuovo",

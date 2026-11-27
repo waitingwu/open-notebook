@@ -10,6 +10,9 @@ vi.mock('@/lib/hooks/use-notebook-chat')
 vi.mock('@/components/sources/ChatPanel', () => ({
   ChatPanel: () => <div data-testid="chat-panel" />
 }))
+vi.mock('@/components/common/RepoMounts', () => ({
+  RepoMounts: () => <div data-testid="repo-mounts" />
+}))
 
 // Type-safe mock factory for useNotes hook
 function createNotesMock(overrides: { isLoading?: boolean } = {}) {

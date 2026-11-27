@@ -1,6 +1,8 @@
+import { repoKbEn } from '../repo-kb';
 import type { TranslationShape } from '../en-US';
 
 export const zhCN = {
+  repoKb: repoKbEn,
   common: {
     search: "搜索...",
     create: "新建",

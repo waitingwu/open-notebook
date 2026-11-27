@@ -48,6 +48,7 @@ const getNavigation = (t: TFunction) => [
     title: t('navigation.collect'),
     items: [
       { name: t('navigation.sources'), href: '/sources', icon: FileText, iconClass: 'text-sage' },
+      { name: t('repoKb.title'), href: '/repo-kb', icon: Book, iconClass: 'text-sage' },
     ],
   },
   {

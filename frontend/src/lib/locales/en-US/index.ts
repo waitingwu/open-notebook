@@ -1,4 +1,6 @@
+import { repoKbEn } from '../repo-kb';
 export const enUS = {
+  repoKb: repoKbEn,
   common: {
     search: "Search...",
     create: "New",

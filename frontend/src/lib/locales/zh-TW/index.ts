@@ -1,6 +1,8 @@
+import { repoKbZhTW } from '../repo-kb';
 import type { TranslationShape } from '../en-US';
 
 export const zhTW = {
+  repoKb: repoKbZhTW,
   common: {
     search: "搜尋...",
     create: "新增",
