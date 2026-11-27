@@ -33,6 +33,8 @@ class ProtectedRule:
             "/" in pattern or any(c in pattern for c in "*?[]")
         ):
             raise ValueError("Directory name must be a literal name")
+        if self.kind == "glob" and any(c in pattern for c in "[]"):
+            raise ValueError("Character classes are not supported in protected globs")
 
 
 def _glob_regex(pattern: str) -> re.Pattern[str]:

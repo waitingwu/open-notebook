@@ -34,7 +34,9 @@ def test_direct_descendant_lookup_respects_a_pruned_glob_directory() -> None:
     assert is_protected("a/private/nested/file", is_dir=False, rules=rules)
 
 
-@pytest.mark.parametrize("pattern", ["", "*", "**", "/", "../secret", "x//y"])
+@pytest.mark.parametrize(
+    "pattern", ["", "*", "**", "/", "../secret", "x//y", "x/[ab]/**"]
+)
 def test_rejects_dangerous_patterns(pattern: str) -> None:
     with pytest.raises(ValueError):
         ProtectedRule("glob", pattern)

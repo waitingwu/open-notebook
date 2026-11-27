@@ -20,6 +20,7 @@ from open_notebook.repo_kb.policy import (
     has_denied_component,
     is_denied_dir_name,
 )
+from open_notebook.repo_kb.protected_rules import ProtectedRule, is_protected
 
 
 @dataclass
@@ -30,9 +31,43 @@ class TreeEntry:
 
 
 class GitRepo:
-    def __init__(self, path: str):
+    def __init__(
+        self, path: str, protected_rules: Optional[List[ProtectedRule]] = None
+    ):
         self.path = path
+        # None keeps the original PoC behaviour; native sources pass an
+        # explicit list, including an empty list when no rules are configured.
+        self.protected_rules = protected_rules
         self._batch: Optional[subprocess.Popen] = None
+
+    def _denied(self, path: str, *, is_dir: bool = False) -> bool:
+        if self.protected_rules is None:
+            return (
+                is_denied_dir_name(path.rstrip("/").rsplit("/", 1)[-1])
+                if is_dir
+                else has_denied_component(path)
+            )
+        return is_protected(path, is_dir=is_dir, rules=self.protected_rules)
+
+    def _excluded_pathspecs(self) -> List[str]:
+        if self.protected_rules is None:
+            return git_exclude_pathspecs()
+        specs = []
+        for rule in self.protected_rules:
+            if not rule.enabled:
+                continue
+            if rule.kind == "dir_name":
+                specs.extend(
+                    [
+                        f":(exclude,glob,icase){rule.pattern}/**",
+                        f":(exclude,glob,icase)**/{rule.pattern}/**",
+                    ]
+                )
+            else:
+                specs.append(f":(exclude,glob,icase){rule.pattern}")
+                if not rule.pattern.endswith("/**"):
+                    specs.append(f":(exclude,glob,icase){rule.pattern}/**")
+        return specs
 
     # -- plumbing ---------------------------------------------------------
     def _git(self, *args: str) -> bytes:
@@ -98,12 +133,12 @@ class GitRepo:
             path = prefix + name
             if mode == "40000":
                 # Policy check BEFORE the sub-tree object is read.
-                if is_denied_dir_name(name) or not allow_dir(path + "/"):
+                if self._denied(path, is_dir=True) or not allow_dir(path + "/"):
                     continue
                 _, sub = self._cat(sha)
                 yield from self._walk_tree(sub, path + "/", allow_dir, allow_file)
             elif mode.startswith("100"):
-                if has_denied_component(path) or not allow_file(path):
+                if self._denied(path) or not allow_file(path):
                     continue
                 yield TreeEntry(path=path, blob=sha)
             # submodules (160000) and symlinks (120000) are skipped
@@ -116,7 +151,7 @@ class GitRepo:
 
     def read_path(self, commit: str, path: str) -> Tuple[str, bytes]:
         """(blob sha, content) of ``path`` at ``commit``; policy-checked."""
-        if has_denied_component(path):
+        if self._denied(path):
             raise PermissionError(f"path denied by policy: {path}")
         sha, otype, data = self._cat_full(f"{commit}:{path}")
         if otype != "blob":
@@ -133,7 +168,7 @@ class GitRepo:
             "--no-renames",
             "--",
             ".",
-            *git_exclude_pathspecs(),
+            *self._excluded_pathspecs(),
         ).decode("utf-8", errors="surrogateescape")
         result: Dict[str, Tuple[str, str]] = {}
         cur: Optional[Tuple[str, str]] = None
@@ -141,12 +176,12 @@ class GitRepo:
             if line.startswith("\x01"):
                 sha, date = line[1:].split("\t")
                 cur = (sha, date)
-            elif line and cur and line not in result and not has_denied_component(line):
+            elif line and cur and line not in result and not self._denied(line):
                 result[line] = cur
         return result
 
     def blob_at(self, commit: str, path: str) -> Optional[str]:
-        if has_denied_component(path):
+        if self._denied(path):
             raise PermissionError(f"path denied by policy: {path}")
         out = subprocess.run(
             [
@@ -164,7 +199,7 @@ class GitRepo:
         return out.stdout.strip() if out.returncode == 0 else None
 
     def last_commit_of(self, commit: str, path: str) -> Tuple[str, str]:
-        if has_denied_component(path):
+        if self._denied(path):
             raise PermissionError(f"path denied by policy: {path}")
         out = (
             self._git("log", "-1", "--format=%H%x09%cI", commit, "--", path)
@@ -184,11 +219,11 @@ class GitRepo:
             new,
             "--",
             ".",
-            *git_exclude_pathspecs(),
+            *self._excluded_pathspecs(),
         ).decode("utf-8", errors="surrogateescape")
         changes = []
         for line in out.splitlines():
             status, path = line.split("\t", 1)
-            if not has_denied_component(path):
+            if not self._denied(path):
                 changes.append((status[0], path))
         return changes
