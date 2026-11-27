@@ -1,0 +1,14 @@
+REMOVE FIELD IF EXISTS repo_kbs ON notebook;
+REMOVE TABLE IF EXISTS repo_exclusion_audit;
+REMOVE TABLE IF EXISTS repo_wiki_export;
+REMOVE TABLE IF EXISTS repo_wiki_note;
+REMOVE TABLE IF EXISTS repo_wiki_revision;
+REMOVE TABLE IF EXISTS repo_access_log;
+REMOVE TABLE IF EXISTS repo_kb_event;
+REMOVE TABLE IF EXISTS repo_discrepancy;
+REMOVE TABLE IF EXISTS repo_wiki_section;
+REMOVE TABLE IF EXISTS repo_wiki_page;
+REMOVE TABLE IF EXISTS repo_chunk;
+REMOVE TABLE IF EXISTS repo_file;
+REMOVE TABLE IF EXISTS repo_source;
+REMOVE TABLE IF EXISTS repo_kb;
