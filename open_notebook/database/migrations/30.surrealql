@@ -9,6 +9,7 @@ DEFINE FIELD IF NOT EXISTS updated ON repo_kb TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS last_build_at ON repo_kb TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_build_commit_set ON repo_kb FLEXIBLE TYPE object DEFAULT {};
 DEFINE FIELD IF NOT EXISTS stale ON repo_kb TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS search_generation ON repo_kb TYPE option<record<repo_search_generation>>;
 
 DEFINE TABLE IF NOT EXISTS repo_source SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS kb ON repo_source TYPE record<repo_kb>;
@@ -141,3 +142,23 @@ DEFINE FIELD IF NOT EXISTS reason ON repo_exclusion_audit TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS ts ON repo_exclusion_audit TYPE datetime DEFAULT time::now();
 
 DEFINE FIELD IF NOT EXISTS repo_kbs ON notebook TYPE array<record<repo_kb>> DEFAULT [];
+
+-- Compact application-built inverted index. A generation is made visible only
+-- after all its documents and postings have been written successfully.
+DEFINE TABLE IF NOT EXISTS repo_search_generation SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS kb ON repo_search_generation TYPE record<repo_kb>;
+DEFINE FIELD IF NOT EXISTS created ON repo_search_generation TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS document_count ON repo_search_generation TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS ready ON repo_search_generation TYPE bool DEFAULT false;
+
+DEFINE TABLE IF NOT EXISTS repo_search_document SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS generation ON repo_search_document TYPE record<repo_search_generation>;
+DEFINE FIELD IF NOT EXISTS ordinal ON repo_search_document TYPE int;
+DEFINE FIELD IF NOT EXISTS target ON repo_search_document TYPE record;
+DEFINE INDEX IF NOT EXISTS repo_search_document_generation ON repo_search_document FIELDS generation;
+
+DEFINE TABLE IF NOT EXISTS repo_search_posting SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS generation ON repo_search_posting TYPE record<repo_search_generation>;
+DEFINE FIELD IF NOT EXISTS gram ON repo_search_posting TYPE string;
+DEFINE FIELD IF NOT EXISTS ids ON repo_search_posting TYPE bytes;
+DEFINE INDEX IF NOT EXISTS repo_search_posting_generation ON repo_search_posting FIELDS generation;

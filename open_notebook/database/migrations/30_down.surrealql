@@ -1,4 +1,7 @@
 REMOVE FIELD IF EXISTS repo_kbs ON notebook;
+REMOVE TABLE IF EXISTS repo_search_posting;
+REMOVE TABLE IF EXISTS repo_search_document;
+REMOVE TABLE IF EXISTS repo_search_generation;
 REMOVE TABLE IF EXISTS repo_exclusion_audit;
 REMOVE TABLE IF EXISTS repo_wiki_export;
 REMOVE TABLE IF EXISTS repo_wiki_note;
