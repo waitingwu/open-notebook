@@ -87,6 +87,7 @@ async def activate_snapshot(
         UPDATE $snapshot SET ready = true, file_count = $file_count;
         UPDATE $source SET current_snapshot = $snapshot, last_commit = $commit,
             file_count = $file_count, last_synced_at = time::now(), status = 'ok';
+        UPDATE $kb SET stale = true;
         UPDATE $kb UNSET search_generation;
         COMMIT TRANSACTION;
     """

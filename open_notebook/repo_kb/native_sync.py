@@ -112,8 +112,12 @@ async def _sync_locked(
         categories: Counter[str] = Counter()
         masks: Counter[str] = Counter()
         reused = 0
+        added = 0
+        modified = 0
+        seen_paths: set[str] = set()
         with tempfile.TemporaryDirectory(prefix="repo-kb-convert-") as tmp:
             for index, entry in enumerate(entries, 1):
+                seen_paths.add(entry.path)
                 old = old_files.get(entry.path)
                 if old and old["blob"] == entry.blob:
                     chunks = await db.query(
@@ -139,6 +143,10 @@ async def _sync_locked(
                     )
                     reused += 1
                 else:
+                    if old:
+                        modified += 1
+                    else:
+                        added += 1
                     prepared = await asyncio.to_thread(
                         prepare_entry, git, entry, source["role"], protected, tmp
                     )
@@ -154,6 +162,9 @@ async def _sync_locked(
             "commit": commit,
             "files": len(entries),
             "reused": reused,
+            "added": added,
+            "modified": modified,
+            "deleted": len(set(old_files) - seen_paths),
             "by_category": dict(categories),
             "masks": dict(masks),
         }

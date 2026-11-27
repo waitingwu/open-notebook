@@ -72,6 +72,9 @@ async def test_full_sync_masks_prunes_and_preserves_previous_snapshot_on_failure
             db, source["id"], allowed_roots=[str(tmp_path)], data_roots=[]
         )
         assert result["reused"] == 1
+        assert result["modified"] == 1
+        assert result["added"] == 0
+        assert result["deleted"] == 0
         current = await db.query("SELECT * FROM ONLY $id;", {"id": source["id"]})
         assert current["current_snapshot"] != old_snapshot
         old_snapshot = current["current_snapshot"]
