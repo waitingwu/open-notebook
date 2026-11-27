@@ -11,6 +11,7 @@ from surrealdb import RecordID
 
 from open_notebook.repo_kb.gitsource import GitRepo
 from open_notebook.repo_kb.native_ingest import prepare_entry
+from open_notebook.repo_kb.native_lock import WriteLock, acquire, release
 from open_notebook.repo_kb.native_paths import validate_source_path
 from open_notebook.repo_kb.native_store import (
     activate_snapshot,
@@ -38,7 +39,6 @@ async def sync_full_source(
 ) -> dict[str, Any]:
     """Stage a full source and activate it only after all writes succeed.
 
-    The caller must hold a per-KB write lock for this entire operation.
     Subsequent wiki and search builds remain separate jobs.
     """
     if source_id.table_name != "repo_source":
@@ -46,6 +46,31 @@ async def sync_full_source(
     source = await db.query("SELECT * FROM ONLY $id;", {"id": source_id})
     if not isinstance(source, dict) or not source.get("enabled"):
         raise ValueError("Source is missing or disabled")
+    lock = await acquire(db.query_raw, source["kb"])
+    try:
+        current = await db.query("SELECT * FROM ONLY $id;", {"id": source_id})
+        if (
+            not isinstance(current, dict)
+            or not current.get("enabled")
+            or current.get("kb") != lock.kb
+        ):
+            raise ValueError("Source changed before sync")
+        return await _sync_locked(
+            db, source_id, current, lock, allowed_roots, data_roots, progress
+        )
+    finally:
+        await release(db.query_raw, lock)
+
+
+async def _sync_locked(
+    db: Database,
+    source_id: RecordID,
+    source: dict[str, Any],
+    lock: WriteLock,
+    allowed_roots: list[str],
+    data_roots: list[str],
+    progress: Progress | None,
+) -> dict[str, Any]:
     path = validate_source_path(
         source["path"], allowed_roots=allowed_roots, data_roots=data_roots
     )
@@ -56,7 +81,7 @@ async def sync_full_source(
     git = GitRepo(str(path), protected)
     try:
         commit = await asyncio.to_thread(git.head)
-        snapshot = await create_snapshot(db.query_raw, source_id, commit)
+        snapshot = await create_snapshot(db.query_raw, source_id, commit, lock)
         entries = await asyncio.to_thread(
             lambda: list(git.walk(commit, rules.allows_dir, rules.allows_file))
         )
@@ -67,13 +92,13 @@ async def sync_full_source(
                 prepared = await asyncio.to_thread(
                     prepare_entry, git, entry, source["role"], protected, tmp
                 )
-                await replace_file(db.query_raw, source_id, snapshot, prepared)
+                await replace_file(db.query_raw, source_id, snapshot, prepared, lock)
                 categories[prepared.category] += 1
                 masks.update(prepared.masks)
                 if progress is not None:
                     await progress(index, len(entries))
         await activate_snapshot(
-            db.query_raw, source_id, snapshot, source["kb"], commit, len(entries)
+            db.query_raw, source_id, snapshot, source["kb"], commit, len(entries), lock
         )
         return {
             "commit": commit,

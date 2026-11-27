@@ -9,6 +9,7 @@ from uuid import uuid4
 from surrealdb import RecordID
 
 from open_notebook.repo_kb.native_ingest import PreparedFile
+from open_notebook.repo_kb.native_lock import GUARD, WriteLock
 
 Query = Callable[[str, dict[str, Any]], Awaitable[Any]]
 
@@ -23,14 +24,28 @@ async def _checked(query: Query, sql: str, params: dict[str, Any]) -> list[Any]:
     return statements
 
 
-async def create_snapshot(query: Query, source: RecordID, commit_sha: str) -> RecordID:
+async def create_snapshot(
+    query: Query, source: RecordID, commit_sha: str, lock: WriteLock | None = None
+) -> RecordID:
     if source.table_name != "repo_source" or not commit_sha:
         raise ValueError("A source and commit are required")
     snapshot = RecordID("repo_source_snapshot", uuid4().hex)
+    guard = (
+        (
+            GUARD
+            + " LET $src = SELECT * FROM ONLY $source; IF $src = NONE OR $src.kb != $lock_kb { THROW 'Lock scope mismatch'; };"
+        )
+        if lock
+        else ""
+    )
+    params = {"id": snapshot, "data": {"source": source, "commit_sha": commit_sha}}
+    if lock:
+        params.update(lock.params())
+        params["source"] = source
     await _checked(
         query,
-        "CREATE $id CONTENT $data;",
-        {"id": snapshot, "data": {"source": source, "commit_sha": commit_sha}},
+        f"BEGIN TRANSACTION; {guard} CREATE $id CONTENT $data; COMMIT TRANSACTION;",
+        params,
     )
     return snapshot
 
@@ -42,6 +57,7 @@ async def activate_snapshot(
     kb: RecordID,
     commit_sha: str,
     file_count: int,
+    lock: WriteLock | None = None,
 ) -> None:
     """Activate a complete snapshot and invalidate search in one transaction.
 
@@ -55,10 +71,13 @@ async def activate_snapshot(
         raise ValueError("Invalid snapshot activation records")
     if file_count < 0 or not commit_sha:
         raise ValueError("Invalid snapshot metadata")
+    if lock and lock.kb != kb:
+        raise ValueError("Lock does not belong to this knowledge base")
     # Conditions ensure a stale/mismatched staging operation cannot overwrite
     # another source. A failed condition aborts the entire transaction.
     sql = """
         BEGIN TRANSACTION;
+        __GUARD__
         LET $s = SELECT * FROM ONLY $source;
         LET $snapshot_row = SELECT * FROM ONLY $snapshot;
         LET $files = SELECT count() AS total FROM repo_file WHERE snapshot = $snapshot GROUP ALL;
@@ -71,17 +90,16 @@ async def activate_snapshot(
         UPDATE $kb UNSET search_generation;
         COMMIT TRANSACTION;
     """
-    await _checked(
-        query,
-        sql,
-        {
-            "source": source,
-            "snapshot": snapshot,
-            "kb": kb,
-            "commit": commit_sha,
-            "file_count": file_count,
-        },
-    )
+    params = {
+        "source": source,
+        "snapshot": snapshot,
+        "kb": kb,
+        "commit": commit_sha,
+        "file_count": file_count,
+    }
+    if lock:
+        params.update(lock.params())
+    await _checked(query, sql.replace("__GUARD__", GUARD if lock else ""), params)
 
 
 def file_id(source: RecordID, snapshot: RecordID, path: str) -> RecordID:
@@ -93,7 +111,11 @@ def file_id(source: RecordID, snapshot: RecordID, path: str) -> RecordID:
 
 
 async def replace_file(
-    query: Query, source: RecordID, snapshot: RecordID, prepared: PreparedFile
+    query: Query,
+    source: RecordID,
+    snapshot: RecordID,
+    prepared: PreparedFile,
+    lock: WriteLock | None = None,
 ) -> None:
     """Replace one file and its chunks in a single transaction.
 
@@ -132,6 +154,7 @@ async def replace_file(
     ]
     statements = [
         "BEGIN TRANSACTION;",
+        GUARD if lock else "",
         "LET $stage = SELECT * FROM ONLY $snapshot;",
         "IF $stage = NONE OR $stage.source != $source OR $stage.ready = true { THROW 'Invalid snapshot'; };",
         "DELETE repo_chunk WHERE file = $target;",
@@ -141,14 +164,17 @@ async def replace_file(
     if chunks:
         statements.append("INSERT INTO repo_chunk $chunks RETURN NONE;")
     statements.append("COMMIT TRANSACTION;")
-    await _checked(
-        query,
-        "\n".join(statements),
-        {
-            "target": target,
-            "metadata": metadata,
-            "chunks": chunks,
-            "source": source,
-            "snapshot": snapshot,
-        },
-    )
+    params = {
+        "target": target,
+        "metadata": metadata,
+        "chunks": chunks,
+        "source": source,
+        "snapshot": snapshot,
+    }
+    if lock:
+        params.update(lock.params())
+        statements.insert(
+            3,
+            "LET $src = SELECT * FROM ONLY $source; IF $src = NONE OR $src.kb != $lock_kb { THROW 'Lock scope mismatch'; };",
+        )
+    await _checked(query, "\n".join(statements), params)

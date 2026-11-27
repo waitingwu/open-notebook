@@ -154,6 +154,11 @@ DEFINE FIELD IF NOT EXISTS ts ON repo_exclusion_audit TYPE datetime DEFAULT time
 
 DEFINE FIELD IF NOT EXISTS repo_kbs ON notebook TYPE array<record<repo_kb>> DEFAULT [];
 
+DEFINE TABLE IF NOT EXISTS repo_kb_lock SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS kb ON repo_kb_lock TYPE record<repo_kb>;
+DEFINE FIELD IF NOT EXISTS token ON repo_kb_lock TYPE string;
+DEFINE FIELD IF NOT EXISTS expires ON repo_kb_lock TYPE datetime;
+
 -- Compact application-built inverted index. A generation is made visible only
 -- after all its documents and postings have been written successfully.
 DEFINE TABLE IF NOT EXISTS repo_search_generation SCHEMAFULL;
