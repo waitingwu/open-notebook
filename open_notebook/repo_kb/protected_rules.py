@@ -6,6 +6,7 @@ are intentionally independent of the PoC's fixed policy during migration.
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from dataclasses import dataclass
 from typing import Literal
@@ -91,3 +92,29 @@ def is_protected(path: str, *, is_dir: bool, rules: list[ProtectedRule]) -> bool
                 if parent.fullmatch("/".join(directories[:i])):
                     return True
     return False
+
+
+@dataclass(frozen=True)
+class NativePathRules:
+    """Source-local include, ordinary exclusion, and protected exclusion rules."""
+
+    include: list[str]
+    exclude: list[str]
+    protected: list[ProtectedRule]
+
+    def allows_file(self, path: str) -> bool:
+        if is_protected(path, is_dir=False, rules=self.protected):
+            return False
+        if any(fnmatch.fnmatchcase(path, pattern) for pattern in self.exclude):
+            return False
+        return not self.include or any(
+            fnmatch.fnmatchcase(path, pattern) for pattern in self.include
+        )
+
+    def allows_dir(self, path: str) -> bool:
+        if is_protected(path, is_dir=True, rules=self.protected):
+            return False
+        return not any(
+            fnmatch.fnmatchcase(path.rstrip("/") + "/", pattern)
+            for pattern in self.exclude
+        )

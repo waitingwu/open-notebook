@@ -2,7 +2,11 @@
 
 import pytest
 
-from open_notebook.repo_kb.protected_rules import ProtectedRule, is_protected
+from open_notebook.repo_kb.protected_rules import (
+    NativePathRules,
+    ProtectedRule,
+    is_protected,
+)
 
 
 def test_rules_are_empty_by_default_and_git_is_always_excluded() -> None:
@@ -32,6 +36,15 @@ def test_direct_descendant_lookup_respects_a_pruned_glob_directory() -> None:
     rules = [ProtectedRule("glob", "a/*")]
     assert is_protected("a/private", is_dir=True, rules=rules)
     assert is_protected("a/private/nested/file", is_dir=False, rules=rules)
+
+
+def test_native_source_include_exclude_and_protection_are_independent() -> None:
+    rules = NativePathRules(["**/*.txt"], ["*/ignore.txt"], [ProtectedRule("dir_name", "secret")])
+    assert rules.allows_file("docs/readme.txt")
+    assert not rules.allows_file("docs/ignore.txt")
+    assert not rules.allows_file("docs/readme.pdf")
+    assert not rules.allows_dir("docs/secret/")
+    assert not rules.allows_file("docs/secret/readme.txt")
 
 
 @pytest.mark.parametrize(
