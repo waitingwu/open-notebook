@@ -34,12 +34,17 @@ async def test_create_notebook_scoped_kb_and_source(tmp_path: Path) -> None:
             role="doc",
             include=["**"],
             exclude=[],
-            protected=[ProtectedRule("dir_name", "secret")],
+            protected=[ProtectedRule("dir_name", "secret", note="Private documents")],
             allowed_roots=[str(tmp_path)],
             data_roots=[],
         )
         assert source["protected"] == [
-            {"kind": "dir_name", "pattern": "secret", "enabled": True}
+            {
+                "kind": "dir_name",
+                "pattern": "secret",
+                "enabled": True,
+                "note": "Private documents",
+            }
         ]
         assert source["file_count"] == 0
         with pytest.raises(ValueError):

@@ -17,6 +17,7 @@ class ProtectedRule:
     kind: Literal["dir_name", "glob"]
     pattern: str
     enabled: bool = True
+    note: str | None = None
 
     def __post_init__(self) -> None:
         pattern = self.pattern
